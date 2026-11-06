@@ -33,10 +33,21 @@ def json_response(payload, status=200):
     return response
 
 
+def sanitize_users(users):
+    """Удаляет хэши паролей из списка пользователей перед выдачей клиенту."""
+    if not isinstance(users, list):
+        return users
+    fields = ("id", "name", "login", "role")
+    return [{k: u.get(k, "") for k in fields} for u in users if isinstance(u, dict)]
+
+
 def selected_section(project, section):
-    """Возвращает bootstrap или исходный раздел без изменения сохранённого объекта."""
+    """Возвращает bootstrap или раздел без хэшей паролей и с сохранением оригинала."""
     if section == "bootstrap":
-        return {key: value for key, value in project.items() if key not in DEFERRED_SECTIONS}
+        data = {key: value for key, value in project.items() if key not in DEFERRED_SECTIONS}
+        if "users" in data:
+            data["users"] = sanitize_users(data["users"])
+        return data
     if section not in DEFERRED_SECTIONS:
         abort(400, description="Unknown editor section")
     return project.get(section, SECTION_DEFAULTS[section])

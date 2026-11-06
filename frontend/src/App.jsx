@@ -884,8 +884,16 @@ function downloadTemplate(filename, headers, exampleRows) {
   XLSX.writeFile(wb, filename);
 }
 
+function sanitizeCellForExcel(val) {
+  if (typeof val === "string" && /^[=+\-@\t\r]/.test(val)) {
+    return "'" + val;
+  }
+  return val;
+}
+
 function downloadRowsXlsx(filename, sheetName, headers, rows) {
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const safeRows = rows.map((r) => Array.isArray(r) ? r.map(sanitizeCellForExcel) : r);
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...safeRows]);
   ws["!cols"] = headers.map((h, i) => ({ wch: Math.max(12, Math.min(36, Math.max(h.length + 2, ...rows.slice(0, 100).map((r) => String(r[i] ?? "").length + 2)))) }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName || "Данные");
@@ -21013,8 +21021,8 @@ ${check.reason || "Конфликт расписания"}
       return;
     }
     const title = `Расписание — ${currentViewName}`;
+    const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     if (weekScope === "all") {
-      const esc=(v)=>String(v??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
       const makeParity=(parity,label)=>{
         const weeks=Array.from({length:totalWeeksInSchedule},(_,i)=>i+1).filter((w)=>parity==="odd"?w%2===1:w%2===0);
         return `<h2>${label}</h2>`+weeks.map((week)=>{
@@ -21042,7 +21050,7 @@ ${check.reason || "Конфликт расписания"}
     }
     let tableRows = "";
     for (let p = 0; p < data.config.periodsPerDay; p++) {
-      tableRows += `<tr><td style="font-weight:bold;">${p + 1}<br/><span style="font-size:9pt;color:#555;">${data.config.periodTimes[p] || ""}</span></td>`;
+      tableRows += `<tr><td style="font-weight:bold;">${p + 1}<br/><span style="font-size:9pt;color:#555;">${esc(data.config.periodTimes[p] || "")}</span></td>`;
       for (const day of activeDayIndices) {
         const cells = cellFor(day, p);
         if (cells.length === 0) { tableRows += `<td></td>`; continue; }
@@ -21052,20 +21060,20 @@ ${check.reason || "Конфликт расписания"}
           const teacher = byId(data.teachers, cell.subOverride?.teacherId || cell.inst.teacherId)?.name || "";
           const group = byId(data.groups, cell.inst.groupId)?.name || "";
           const room = assignmentRoomLabel(data, cell.a) || "";
-          const lines = [`<b>${subj}</b> (${type})`];
-          if (viewKind !== "teacher") lines.push(teacher);
-          if (viewKind !== "group") lines.push(group);
-          if (viewKind !== "room") lines.push(cell.inst.format === "remote" ? "дистанционно" : `ауд. ${room}`);
-          if (cell.inst.weekPattern && cell.inst.weekPattern !== "all") lines.push(weekNumbersLabel(data.config, cell.inst));
+          const lines = [`<b>${esc(subj)}</b> (${esc(type)})`];
+          if (viewKind !== "teacher") lines.push(esc(teacher));
+          if (viewKind !== "group") lines.push(esc(group));
+          if (viewKind !== "room") lines.push(cell.inst.format === "remote" ? "дистанционно" : `ауд. ${esc(room)}`);
+          if (cell.inst.weekPattern && cell.inst.weekPattern !== "all") lines.push(esc(weekNumbersLabel(data.config, cell.inst)));
           return `<div style="margin-bottom:4px;">${lines.join("<br/>")}</div>`;
         }).join("");
         tableRows += `<td>${html}</td>`;
       }
       tableRows += `</tr>`;
     }
-    const headHtml = `<tr><th>Пара</th>${activeDayIndices.map((d) => `<th>${DAY_LABELS_FULL[d]}</th>`).join("")}</tr>`;
+    const headHtml = `<tr><th>Пара</th>${activeDayIndices.map((d) => `<th>${esc(DAY_LABELS_FULL[d])}</th>`).join("")}</tr>`;
     const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-<head><meta charset="utf-8"><title>${title}</title>
+<head><meta charset="utf-8"><title>${esc(title)}</title>
 <style>
 body{font-family:Calibri,Arial,sans-serif;font-size:11pt;}
 h1{font-size:16pt;}
@@ -21074,7 +21082,7 @@ th,td{border:1px solid #888;padding:6px 8px;vertical-align:top;font-size:10pt;}
 th{background:#1E3A5F;color:#ffffff;}
 </style></head>
 <body>
-<h1>${title}</h1>
+<h1>${esc(title)}</h1>
 <table>${headHtml}${tableRows}</table>
 </body></html>`;
     const blob = new Blob(["\ufeff", html], { type: "application/msword" });
@@ -27254,7 +27262,13 @@ export default function App() {
       payload = buildSyncedSnapshot(scoped);
       json = JSON.stringify(payload);
       if (manual) {
-        try { sessionStorage.setItem("schedule-crash-draft-v125", json); } catch {}
+        try {
+          const draft = payload ? { ...payload } : {};
+          if (Array.isArray(draft.users)) {
+            draft.users = draft.users.map(({ id, name, login, role }) => ({ id, name, login, role }));
+          }
+          sessionStorage.setItem("schedule-crash-draft-v125", JSON.stringify(draft));
+        } catch {}
       }
     }
     setSaveState("saving");

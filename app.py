@@ -20,7 +20,13 @@ from datetime import datetime
 from flask import Flask, request, jsonify, send_from_directory, Response, g, has_request_context, redirect
 from werkzeug.exceptions import Forbidden
 from auth import install_auth
-from editor_state import complete_project, partial_write_error, project_for_editor
+from editor_state import (
+    complete_project,
+    merge_users_preserve_hashes,
+    partial_write_error,
+    preserve_deferred_sections,
+    project_for_editor,
+)
 from editor_transport import install_editor_transport
 
 # В контейнере путь задаётся явно через DATA_DIR=/data. Локально без переменной
@@ -253,9 +259,8 @@ class _PersistentSchedulerWorker:
                 self.loaded_cache_key = cache_key
                 return response
 
-_scheduler_shared_worker = _PersistentSchedulerWorker(SCHEDULER_SCRIPT, "scheduler-shared")
-_scheduler_generate_worker = _scheduler_shared_worker
-_scheduler_options_worker = _scheduler_shared_worker
+_scheduler_generate_worker = _PersistentSchedulerWorker(SCHEDULER_SCRIPT, "scheduler-generate")
+_scheduler_options_worker = _PersistentSchedulerWorker(SCHEDULER_SCRIPT, "scheduler-options")
 
 # v1564: маленький LRU-кэш серверных вариантов ручной постановки.
 # Ключ содержит отпечаток актуального storage, поэтому любое реальное изменение
@@ -2758,6 +2763,10 @@ def editor_export(key):
         portable = _store_with_snapshots_for_backup(store)
         raw = portable[key]
         project = json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(project, dict) and "users" in project:
+            from editor_transport import sanitize_users
+            project = dict(project)
+            project["users"] = sanitize_users(project["users"])
     response = Response(_stream_project_json(project), content_type="application/json; charset=utf-8")
     response.headers["Content-Disposition"] = 'attachment; filename="timetable-project.json"'
     response.headers["Cache-Control"] = "private, no-store"
@@ -2990,14 +2999,17 @@ def set_key(key):
         # disappear/reappear in waves between administrators. Schedule mutations
         # must go through the atomic schedule endpoints below. Explicit first-time
         # creation is the only generic-write exception.
-        if key == "schedule-data-v2" and key in store and not allow_create:
+        if key == "schedule-data-v2" and key in store:
             try:
                 remote_existing = json.loads(store[key]) if isinstance(store[key], str) else store[key]
             except Exception:
                 remote_existing = None
-            if isinstance(remote_existing, dict) and isinstance(incoming_value, dict) and "schedule" in remote_existing:
-                incoming_value = dict(incoming_value)
-                incoming_value["schedule"] = remote_existing.get("schedule")
+            if isinstance(remote_existing, dict) and isinstance(incoming_value, dict):
+                incoming_value = preserve_deferred_sections(incoming_value, remote_existing)
+                if "schedule" in remote_existing and not allow_create:
+                    incoming_value["schedule"] = remote_existing.get("schedule")
+                if "users" in incoming_value and "users" in remote_existing:
+                    incoming_value["users"] = merge_users_preserve_hashes(incoming_value["users"], remote_existing["users"])
         store[key] = incoming_value
         save_store(store)
     if raw_mode:
@@ -3070,8 +3082,9 @@ def public_index():
         resp.headers["Expires"] = "0"
         resp.headers["X-Public-Snapshot"] = marker[:96]
         return resp
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    except Exception:
+        app.logger.exception("public_index failed")
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
 
 @app.get("/api/public-status")
@@ -3095,8 +3108,9 @@ def public_status():
         resp.headers["Pragma"] = "no-cache"
         resp.headers["Expires"] = "0"
         return resp
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    except Exception:
+        app.logger.exception("public_index failed")
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
 
 @app.get("/api/public-room-availability")
@@ -3276,8 +3290,9 @@ def public_schedule_shard(kind, entity_id):
         resp.headers["X-Public-Snapshot"] = marker[:96]
         resp.headers["X-Public-Scope"] = scope
         return resp
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    except Exception:
+        app.logger.exception("public_index failed")
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
 
 @app.get("/api/public-bootstrap")
@@ -3327,8 +3342,9 @@ def public_bootstrap():
         resp.headers["Expires"] = "0"
         resp.headers["X-Public-Snapshot"] = marker[:96]
         return resp
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    except Exception:
+        app.logger.exception("public_index failed")
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
 
 def _active_presence():
@@ -3704,8 +3720,9 @@ def _run_generation_job(job_id, payload, script_path=SCHEDULER_SCRIPT):
                                         "message":"Расчёт остановлен: вкладка редактора больше не активна."})
                     return
             else:
+                max_mb = str(int(os.environ.get("NODE_WORKER_MAX_OLD_SPACE_MB", "512")))
                 proc = subprocess.run(
-                    ["node", script_path],
+                    ["node", f"--max-old-space-size={max_mb}", script_path],
                     input=json.dumps(run_payload, ensure_ascii=False),
                     text=True, capture_output=True, timeout=GENERATION_TIMEOUT_SECONDS, check=False,
                 )
@@ -3933,8 +3950,9 @@ def schedule_placement_options():
         result = parsed.get("result") or {}
         _schedule_options_cache_put(cache_key, result)
         return jsonify({"result": result, "elapsed_ms": parsed.get("elapsedMs") or int((time.time()-started)*1000), "cached": False, "worker": True})
-    except Exception as exc:
-        return jsonify({"error": str(exc)}), 500
+    except Exception:
+        app.logger.exception("public_index failed")
+        return jsonify({"error": "Внутренняя ошибка сервера"}), 500
 
 
 @app.get("/api/schedule/generate/<job_id>")
@@ -8080,6 +8098,9 @@ def _performance_cache_headers(response):
         # HTML shell must notice a new deploy, but avoid legacy proxy caching.
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
+    response.headers["X-Frame-Options"] = "SAMEORIGIN"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     return response
 
 @app.get("/api/app-build")

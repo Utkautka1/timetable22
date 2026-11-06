@@ -17,12 +17,16 @@ flowchart LR
     Legacy[tools/app.py] --> API
     API --> Auth
     Auth --> Key[DATA_DIR session signing key]
+    Auth --> SessionRevoke[Server session revocation table]
     API --> SQLite[(SQLite)]
     API --> PgCompat[pg_compat.py]
     PgCompat --> Postgres[(PostgreSQL)]
     API --> Backups[DATA_DIR backups]
     API --> Public[Public snapshot shards]
-    API --> Scheduler[server_scheduler.mjs]
+    API --> GenWorker[SchedulerGenerate worker]
+    API --> OptWorker[SchedulerOptions worker]
+    GenWorker --> Scheduler[server_scheduler.mjs]
+    OptWorker --> Scheduler
     API --> GraphScheduler[server_graph_scheduler.mjs]
     Browser --> ClientScheduler[Browser scheduler in App.jsx]
 ```
@@ -51,15 +55,17 @@ SQLite и PostgreSQL используют совместимый слой `pg_co
 
 ```mermaid
 flowchart TD
-    Request[API request] --> Guard[guard_api]
+    Request[API request] --> Headers[after_request security headers: X-Frame, nosniff, Referrer]
+    Request --> Guard[guard_api]
     Guard --> PublicGet[Allowlisted public GET and HEAD]
     Guard --> AuthRoutes[auth session login logout setup]
-    Guard --> Session[current_user]
+    Guard --> Session[current_user: check session_id and is_session_revoked]
     Session --> Private[Storage presence generators diagnostics]
-    Session --> EditorTransportRoutes[Editor bootstrap sections schedule export]
-    Session --> Superadmin[Superadmin user changes and backup restore]
+    Session --> EditorTransportRoutes[Editor bootstrap sections schedule export: sanitize_users]
+    Session --> Superadmin[Superadmin RBAC: backup restore download create and user edits]
     Private --> PartialCheck[partial_write_error and complete_project]
-    PartialCheck --> Writes[Atomic storage writes]
+    PartialCheck --> PreserveCheck[preserve_deferred_sections and merge_users_preserve_hashes]
+    PreserveCheck --> Writes[Atomic storage writes]
     Superadmin --> Writes
 ```
 

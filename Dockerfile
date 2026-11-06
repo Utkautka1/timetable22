@@ -38,6 +38,9 @@ COPY server_graph_scheduler.mjs ./
 # executed before packaging; the uploaded v1586 archive did not contain tools/,
 # so copying them here made a clean Amvera build impossible.
 COPY --from=frontend-build /frontend/dist ./static
-RUN mkdir -p /data
+RUN useradd -u 10001 -m -s /bin/sh appuser \
+ && mkdir -p /data \
+ && chown -R appuser:appuser /app /data
+USER appuser
 EXPOSE 5000
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--threads", "4", "--timeout", "120", "--graceful-timeout", "20", "--keep-alive", "5", "--max-requests", "3000", "--max-requests-jitter", "300", "app:app"]

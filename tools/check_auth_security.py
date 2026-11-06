@@ -156,6 +156,21 @@ class ApplicationAuthTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.headers["Cache-Control"], "no-store")
         self.assertEqual(self.client.post("/api/storage-backups/storage_fake.json/restore").status_code, 403)
+        self.assertEqual(self.client.get("/api/storage-backups/storage_fake.json/download").status_code, 403)
+        self.assertEqual(self.client.post("/api/storage-backups/create").status_code, 403)
+
+    def test_editor_bootstrap_does_not_leak_password_hashes(self):
+        """Bootstrap и экспорт редактора не раскрывают хэши паролей."""
+        self.login()
+        res = self.client.get("/api/editor/schedule-data-v2?section=bootstrap")
+        self.assertEqual(res.status_code, 200)
+        for u in res.get_json()["value"].get("users", []):
+            self.assertNotIn("passwordHash", u)
+        res_exp = self.client.get("/api/editor/schedule-data-v2/export")
+        self.assertEqual(res_exp.status_code, 200)
+        exp_data = json.loads(res_exp.data.decode("utf-8"))
+        for u in exp_data.get("users", []):
+            self.assertNotIn("passwordHash", u)
 
     def test_storage_role_escalation(self):
         """Обычный admin не повышает роль ни merge, ни полной заменой."""
@@ -212,6 +227,14 @@ class ApplicationAuthTests(unittest.TestCase):
         with patch.dict(os.environ, {"MAX_STORAGE_BYTES": "1024"}):
             with self.assertRaises(RequestEntityTooLarge):
                 self.module._decompress_storage_body(gzip.compress(b"x" * 1025))
+
+    def test_logout_revokes_stolen_cookie(self):
+        """Выход отзывает сессию на сервере, делая сохранённую cookie невалидной."""
+        self.login()
+        cookie_val = self.client.get_cookie("timetable_session").value
+        self.assertEqual(self.client.post("/api/auth/logout").status_code, 200)
+        self.client.set_cookie("timetable_session", cookie_val)
+        self.assertEqual(self.client.get("/api/storage/schedule-data-v2?editor=1").status_code, 401)
 
 
 

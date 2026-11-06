@@ -12,6 +12,46 @@ DEFERRED_FIELDS = frozenset({
 })
 
 
+def preserve_deferred_sections(incoming, existing):
+    """
+    Восстанавливает отсутствующие тяжёлые секции из существующего состояния.
+
+    Предотвращает потерю нагрузок (loads) и графов при сохранении лёгких разделов.
+    Возвращает объединённый словарь проекта.
+    """
+    if not isinstance(incoming, dict) or not isinstance(existing, dict):
+        return incoming
+    merged = dict(incoming)
+    for field in DEFERRED_FIELDS:
+        if field in existing and (field not in merged or merged[field] is None):
+            merged[field] = existing[field]
+    return merged
+
+
+def merge_users_preserve_hashes(incoming_users, existing_users):
+    """
+    Сохраняет хэши паролей существующих пользователей при записи из клиента.
+
+    Клиент не получает хэши паролей, поэтому восстанавливаем их из базы.
+    """
+    if not isinstance(incoming_users, list):
+        return existing_users if isinstance(existing_users, list) else []
+    existing_map = {str(u.get("id")): u for u in (existing_users or []) if isinstance(u, dict)}
+    login_map = {str(u.get("login", "")).casefold(): u for u in (existing_users or []) if isinstance(u, dict)}
+    result = []
+    for user in incoming_users:
+        if not isinstance(user, dict):
+            continue
+        uid = str(user.get("id") or "")
+        login = str(user.get("login") or "").casefold()
+        prev = existing_map.get(uid) or login_map.get(login) or {}
+        item = dict(user)
+        if not item.get("passwordHash") and prev.get("passwordHash"):
+            item["passwordHash"] = prev["passwordHash"]
+        result.append(item)
+    return result
+
+
 def requested_deferred():
     """Разбирает явный список пропусков; None означает старый полный протокол."""
     if not has_request_context() or "X-Editor-Deferred" not in request.headers:

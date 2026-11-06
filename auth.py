@@ -28,6 +28,35 @@ LOGIN_ATTEMPTS = 10
 _attempts = {}
 _attempt_lock = threading.Lock()
 _DUMMY_HASH = generate_password_hash("unused-constant-for-missing-user")
+_REVOKED_SESSIONS = {}
+_REVOKED_LOCK = threading.Lock()
+SESSION_LIFETIME_SECONDS = 12 * 3600
+
+
+def revoke_session(sid):
+    """Добавляет идентификатор сессии в список отозванных до истечения её TTL."""
+    if not sid:
+        return
+    with _REVOKED_LOCK:
+        now = time.monotonic()
+        for s, exp in list(_REVOKED_SESSIONS.items()):
+            if now > exp:
+                _REVOKED_SESSIONS.pop(s, None)
+        _REVOKED_SESSIONS[sid] = now + SESSION_LIFETIME_SECONDS
+
+
+def is_session_revoked(sid):
+    """Проверяет, была ли сессия отозвана сервером при выходе."""
+    if not sid:
+        return True
+    with _REVOKED_LOCK:
+        exp = _REVOKED_SESSIONS.get(sid)
+        if exp is None:
+            return False
+        if time.monotonic() > exp:
+            _REVOKED_SESSIONS.pop(sid, None)
+            return False
+        return True
 
 
 def session_key(data_dir):
@@ -78,22 +107,28 @@ def password_matches(user, password):
 
 
 def establish_session(user):
-    """Меняет личность целиком после входа, исключая старые данные сессии."""
+    """Меняет личность целиком после входа, создавая уникальный session_id."""
     session.clear()
     session.permanent = True
-    session.update(user_id=str(user["id"]), password_stamp=password_stamp(user))
+    sid = secrets.token_hex(16)
+    session.update(user_id=str(user["id"]), password_stamp=password_stamp(user), session_id=sid)
     reset_login_attempts()
 
 
 def current_user(users):
-    """На каждом запросе сверяет cookie с актуальной ролью и паролем."""
+    """На каждом запросе сверяет cookie с актуальной ролью, паролем и отзывом."""
     identifier = session.get("user_id")
+    sid = session.get("session_id")
+    if not identifier or (sid and is_session_revoked(sid)):
+        return None
     for user in users:
         if str(user.get("id")) != identifier:
             continue
         if user.get("role") not in {"admin", "superadmin"}:
             break
         if hmac.compare_digest(str(session.get("password_stamp", "")), password_stamp(user)):
+            if not sid:
+                session["session_id"] = secrets.token_hex(16)
             return user
     return None
 
@@ -128,16 +163,25 @@ def same_origin():
     return request.headers.get("Sec-Fetch-Site") in {None, "same-origin", "none"}
 
 
+def _prune_login_attempts(now):
+    """Удаляет устаревшие попытки входа и защищает память от переполнения."""
+    for address in list(_attempts):
+        _attempts[address] = [t for t in _attempts[address] if now - t < LOGIN_WINDOW]
+        if not _attempts[address]:
+            _attempts.pop(address, None)
+    if len(_attempts) > 2048:
+        oldest = sorted(_attempts.keys(), key=lambda k: min(_attempts[k]))[:len(_attempts) - 2048]
+        for k in oldest:
+            _attempts.pop(k, None)
+
+
 def login_allowed():
-    """Ограничивает вход по адресу соединения, не доверяя X-Forwarded-For."""
+    """Ограничивает вход по адресу соединения без риска глобального отказа."""
     now = time.monotonic()
     key = request.remote_addr or "unknown"
     with _attempt_lock:
-        for address in list(_attempts):
-            _attempts[address] = [t for t in _attempts[address] if now - t < LOGIN_WINDOW]
-            if not _attempts[address]:
-                del _attempts[address]
-        if len(_attempts.get(key, [])) >= LOGIN_ATTEMPTS or len(_attempts) >= 4096:
+        _prune_login_attempts(now)
+        if len(_attempts.get(key, [])) >= LOGIN_ATTEMPTS:
             return False
         _attempts.setdefault(key, []).append(now)
     return True
@@ -181,7 +225,8 @@ def guard_api(read_users):
         return jsonify(error="Требуется вход сотрудника"), 401
     g.auth_user = user
     g.auth_users = copy.deepcopy(users)
-    if request.endpoint == "storage_backup_restore" and user.get("role") != "superadmin":
+    superadmin_endpoints = {"storage_backup_restore", "storage_backup_download", "storage_backup_create"}
+    if request.endpoint in superadmin_endpoints and user.get("role") != "superadmin":
         return jsonify(error="Требуются права главного администратора"), 403
     return None
 
@@ -229,7 +274,10 @@ def login_response(read_users, update_users, lock):
 
 
 def logout_response():
-    """Удаляет серверную подпись входа из браузерной сессии."""
+    """Отзывает серверную сессию и удаляет cookie в браузере."""
+    sid = session.get("session_id")
+    if sid:
+        revoke_session(sid)
     session.clear()
     return jsonify(ok=True)
 
