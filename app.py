@@ -27,7 +27,7 @@ from editor_state import (
     preserve_deferred_sections,
     project_for_editor,
 )
-from editor_transport import install_editor_transport
+from editor_transport import install_editor_transport, sanitize_users
 
 # В контейнере путь задаётся явно через DATA_DIR=/data. Локально без переменной
 # сохраняем данные рядом с приложением.
@@ -431,7 +431,11 @@ def _public_source_project(project):
         if recovery and isinstance(recovery.get("snapshot"), dict):
             published = recovery["snapshot"]
 
-    source = dict(published) if isinstance(published, dict) else dict(project)
+    if isinstance(published, dict):
+        source = dict(published)
+    else:
+        source = dict(project)
+        source["schedule"] = {"instances": [], "assignment": {}}
     # v1892: old group publications may have persisted only the raw primary row
     # of an implicit stream even though the editor rendered all linked groups.
     # Repair only linkage already declared by the published primary load.
@@ -2795,6 +2799,8 @@ def _editor_compact_project(data):
     if not isinstance(data, dict):
         return data
     out = dict(data)
+    if "users" in out and isinstance(out["users"], list):
+        out["users"] = sanitize_users(out["users"])
     out["scheduleVersions"] = [
         _editor_version_metadata(row) for row in data.get("scheduleVersions") or []
         if isinstance(row, dict)

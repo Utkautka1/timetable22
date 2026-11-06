@@ -188,6 +188,10 @@ function weekDayWithinSemester(config, week, day) {
   return true;
 }
 
+function isGroupOnPractice(data, groupId, date) {
+  return (data?.practices || []).find((p) => p.groupId === groupId && p.dateStart <= date && date <= p.dateEnd) || null;
+}
+
 // v1852: an assignment is not automatically a real occupied occurrence.
 // Old/stale cards can retain day/period while that concrete date is hidden by
 // semester bounds, a no-class exception or group practice. Every occupancy
@@ -3340,7 +3344,7 @@ function generateSchedule(data, prior, perfScope = null) {
   function affectedSubgroupsForGroup(inst, gid) {
     const subs = subgroupsForGroup(inst, gid);
     if (subs.some((sg) => Number(sg) === 0)) return [1, 2];
-    const out = [...new Set(subs.map((sg) => Number(sg)).filter((sg) => sg === 1 || sg === 2))];
+    const out = [...new Set(subs.map((sg) => Number(sg)).filter((sg) => Number.isFinite(sg) && sg >= 1))];
     return out.length ? out : [1, 2];
   }
   function teacherWeekDayPeriods(teacherId, week, day, excludeInstId = null) {

@@ -1,6 +1,6 @@
 # UML проекта timetable22
 
-Обновлено: 2026-11-06 — разделение 50+ МБ проекта на легкий bootstrap, частичную загрузку разделов и потоковый экспорт.
+Обновлено: 2026-11-06 — разделение 50+ МБ проекта на легкий bootstrap, частичную загрузку разделов, потоковый экспорт, изоляцию планировщиков и строгий аудит бизнес-логики.
 
 ## Компоненты
 
@@ -57,7 +57,8 @@ SQLite и PostgreSQL используют совместимый слой `pg_co
 flowchart TD
     Request[API request] --> Headers[after_request security headers: X-Frame, nosniff, Referrer]
     Request --> Guard[guard_api]
-    Guard --> PublicGet[Allowlisted public GET and HEAD]
+    Guard --> PublicGet[Allowlisted public GET and HEAD: index, shards, status, bootstrap, availability]
+    PublicGet --> PublicSource[Public draft isolation: publishedSnapshot only]
     Guard --> AuthRoutes[auth session login logout setup]
     Guard --> Session[current_user: check session_id and is_session_revoked]
     Session --> Private[Storage presence generators diagnostics]
