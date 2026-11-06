@@ -25346,9 +25346,6 @@ function AttestationPanel({ data, set, onPublish }) {
 function dateRangesOverlap(startA, endA, startB, endB) {
   return startA <= endB && startB <= endA;
 }
-function isGroupOnPractice(data, groupId, date) {
-  return (data.practices || []).find((p) => p.groupId === groupId && p.dateStart <= date && date <= p.dateEnd) || null;
-}
 function practiceRoomBookings(p) {
   return Array.isArray(p?.roomBookings) ? p.roomBookings : [];
 }
