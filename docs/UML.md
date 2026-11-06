@@ -96,4 +96,50 @@ classDiagram
     }
 ```
 
+## Производительность и шардирование хранилища
+
+### Точки выдачи и оптимизация Scope Matching
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Браузер / Бот
+    participant API as app.py
+    participant FastMatch as _instance_has_group
+    participant Scope as _editor_matches_scope
+    participant Transport as editor_transport.py
+    participant DB as SQLite kv_store
+
+    User->>API: GET /api/editor/schedule-data-v2/schedule?groupId=9b28grdj
+    activate API
+    API->>Transport: schedule_response(groupId=9b28grdj)
+    activate Transport
+    Transport->>DB: Чтение снимка проекта
+    DB-->>Transport: Полный проект (22882 пар)
+    loop Для каждой из 22882 пар
+        Transport->>FastMatch: _instance_has_group(inst, groupId)
+        alt Группа не совпадает (98.7% пар)
+            FastMatch-->>Transport: False (ранний выход без вычисления 20 недель)
+        else Группа совпадает (295 пар)
+            Transport->>Scope: Полная проверка недель нагрузки и потоков
+            Scope-->>Transport: True/False
+        end
+    end
+    Transport-->>API: Срез группы (314 KB raw / 15.9 KB gzip, ~136 ms)
+    deactivate Transport
+    API-->>User: HTTP 200 OK
+    deactivate API
+```
+
+| Эндпоинт | Raw Size | Gzip Size | Экономия сжатия | Latency (avg) |
+| --- | --- | --- | --- | --- |
+| `/api/storage/schedule-data-v2?full=1` | 56160.2 KB | 2916.5 KB | 94.8% | 349.6 ms |
+| `/api/editor/schedule-data-v2?section=bootstrap` | 659.8 KB | 68.6 KB | 89.6% | 19.0 ms |
+| `/api/editor/schedule-data-v2/schedule?groupId=9b28grdj` | 314.2 KB | 15.9 KB | 94.9% | 136.6 ms |
+| `/api/editor/schedule-data-v2/schedule?groupId=9b28grdj&week=1` | 19.7 KB | 2.2 KB | 88.6% | 44.9 ms |
+| `/api/editor/schedule-data-v2?section=loads` | 1651.0 KB | 87.3 KB | 94.7% | 24.9 ms |
+| `/api/editor/schedule-data-v2?section=graphState` | 1003.2 KB | 61.1 KB | 93.9% | 21.0 ms |
+| `/api/public-index` | 201.4 KB | 21.9 KB | 89.1% | 1.5 ms |
+| `/api/public-schedule/group/9b28grdj` | 361.5 KB | 19.8 KB | 94.5% | 5.0 ms |
+
 Архивные исходники в `tools/frontend/` не участвуют в основной Docker-сборке.

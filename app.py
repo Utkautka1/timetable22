@@ -2706,8 +2706,24 @@ def _editor_read_project(key):
     return project, str(row[0]) if row else "missing"
 
 
+def _instance_has_group(instance, group_id):
+    """Быстро проверяет причастность пары к группе без вычисления недель нагрузки."""
+    if not group_id:
+        return True
+    if str(instance.get("groupId") or "") == group_id:
+        return True
+    if any(str(x) == group_id for x in instance.get("groupIds") or []):
+        return True
+    if any(str(x) == group_id for x in instance.get("streamGroupIds") or []):
+        return True
+    parts = instance.get("streamParticipants") or []
+    return any(str(p.get("groupId") or "") == group_id for p in parts if isinstance(p, dict))
+
+
 def _editor_matches_scope(project, instance, group_id, week):
-    """Повторяет правила рабочего расписания, включая потоки и недели нагрузки."""
+    """Повторяет правила рабочего расписания, отсекая чужие группы до тяжелого анализа."""
+    if not _instance_has_group(instance, group_id):
+        return False
     weeks = _instance_weeks_for_project_py(project, instance)
     if week and week not in weeks:
         return False
