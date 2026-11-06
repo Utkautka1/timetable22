@@ -1,10 +1,32 @@
 /** Откладывает тяжёлые разделы, сохраняя отличие «не загружено» от намеренного удаления. */
 export const EDITOR_SECTIONS = Object.freeze(['loads', 'schedule', 'graphState', 'publishedSnapshot', '_groupRestoreUndo']);
-const LIGHT_TABS = new Set(['semester', 'config', 'users', 'history', 'versions']);
+const TAB_SECTIONS_MAP = {
+  semester: [],
+  constraints: [],
+  announcements: [],
+  consultations: [],
+  lists: [],
+  curriculum: [],
+  substitutions: [],
+  scenarios: [],
+  attestation: [],
+  practices: [],
+  history: [],
+  versions: [],
+  config: [],
+  users: [],
+  loads: ['loads', 'schedule'],
+  graphs: ['loads', 'graphState'],
+  schedule: ['loads', 'schedule', 'graphState'],
+  actualHours: ['loads', 'schedule'],
+  conflicts: ['loads', 'schedule'],
+  bulkEdit: ['loads', 'schedule'],
+  analytics: ['loads', 'schedule'],
+};
 let deferredSections = [...EDITOR_SECTIONS];
 
 export function editorTabSections(tab) {
-  return LIGHT_TABS.has(tab) ? [] : ['loads', 'schedule', 'graphState'];
+  return TAB_SECTIONS_MAP[tab] || [];
 }
 
 export function setEditorDeferred(sections = []) {

@@ -142,4 +142,8 @@ sequenceDiagram
 | `/api/public-index` | 201.4 KB | 21.9 KB | 89.1% | 1.5 ms |
 | `/api/public-schedule/group/9b28grdj` | 361.5 KB | 19.8 KB | 94.5% | 5.0 ms |
 
+### Гранулярная гидратация вкладок (Client-Side Routing)
+
+14 из 21 вкладок панели администратора (`lists`, `constraints`, `announcements`, `consultations`, `curriculum`, `substitutions`, `scenarios`, `attestation`, `practices`, `history`, `versions`, `config`, `users`, `semester`) являются легковесными и отображаются мгновенно (0 мс) из уже полученного `bootstrap` без фоновых запросов к сети. Тяжёлые разделы (`loads`, `graphState`, `schedule`) запрашиваются инкрементально только при переходе на соответствующие специализированные вкладки, исключая повторную загрузку уже имеющихся в памяти данных.
+
 Архивные исходники в `tools/frontend/` не участвуют в основной Docker-сборке.

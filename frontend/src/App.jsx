@@ -27574,16 +27574,25 @@ export default function App() {
 
   const loadEditorSections = async (wanted) => {
     await ensureEditorLoaded();
-    if (!editorMissingSections(latestDataRef.current, wanted).length) return latestDataRef.current;
+    const currentData = latestDataRef.current || {};
+    if (!editorMissingSections(currentData, wanted).length) return currentData;
     await flushEditorChanges();
     const revision = dataRevisionRef.current;
     const editSerial = editorEditSerialRef.current;
-    const alreadyLoaded = EDITOR_SECTIONS.filter(section => !editorMissingSections(latestDataRef.current, [section]).length);
-    const required = [...new Set([...wanted, ...alreadyLoaded])];
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const bootstrap = await editorBootstrapGet();
-        const response = await editorHydrate(bootstrap.value, bootstrap.token, required);
+        const baseProject = {
+          ...currentData,
+          ...bootstrap.value,
+          _editorDeferred: (currentData._editorDeferred || [...EDITOR_SECTIONS]),
+        };
+        for (const s of EDITOR_SECTIONS) {
+          if (!baseProject._editorDeferred.includes(s) && currentData[s] !== undefined) {
+            baseProject[s] = currentData[s];
+          }
+        }
+        const response = await editorHydrate(baseProject, bootstrap.token, wanted);
         if (editSerial !== editorEditSerialRef.current || revision !== dataRevisionRef.current || pendingSaveTabsRef.current.size) throw new Error("Данные изменены во время загрузки; повторите переход");
         return applyEditorHydration(response);
       } catch (error) {
