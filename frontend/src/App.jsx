@@ -1,11 +1,12 @@
 /** Интерфейс редактора и публичного расписания; рабочие данные доступны после серверного входа. */
 import { authRequest } from "./auth.js";
+import { EDITOR_SECTIONS, editorTabSections, editorMissingSections, setEditorDeferred, editorBootstrapGet, editorHydrate, editorExportDownload } from "./editorTransport.js";
 import { useState, useEffect, useRef, useMemo, useDeferredValue, Fragment, startTransition } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx-js-style";
 import { planExactBulkWeekCopy } from "./bulkWeekSnapshot.mjs";
 import { planWeekGraphExcess } from "./weekGraphExcess.mjs";
-import { storageGet, storageGetStrict, publicBootstrapGet, publicIndexGet, publicScheduleGet, publicStatusGet, publicControlGet, publicControlSet, storageSet, storageGraphMerge, storageGraphPatch, storageScheduleMerge, storageScheduleGroupMerge, storageSchedulePatch, storagePublishWeeks, storagePublicationCommit, storageSectionMerge, storageMeta, storageBackups, storageCreateBackup, storageDownloadBackup, storageRestoreBackup, storageRestorePublishedGroup, storageUndoPublishedGroupRestore, storageVersionGet, CLIENT_BUILD_ID, scheduleArchiveList, scheduleFinalizeWeek, scheduleArchiveGet, scheduleArchiveDownload, presenceHeartbeat, presenceLeave, serverGenerateStart, serverGenerateStatus, serverGenerateCancel, serverAutoGraphStart, serverAutoGraphStatus } from "./storage.js";
+import { storageRememberCellRevisions, storageGet, storageGetStrict, publicBootstrapGet, publicIndexGet, publicScheduleGet, publicStatusGet, publicControlGet, publicControlSet, storageSet, storageGraphMerge, storageGraphPatch, storageScheduleMerge, storageScheduleGroupMerge, storageSchedulePatch, storagePublishWeeks, storagePublicationCommit, storageSectionMerge, storageMeta, storageBackups, storageCreateBackup, storageDownloadBackup, storageRestoreBackup, storageRestorePublishedGroup, storageUndoPublishedGroupRestore, storageVersionGet, CLIENT_BUILD_ID, scheduleArchiveList, scheduleFinalizeWeek, scheduleArchiveGet, scheduleArchiveDownload, presenceHeartbeat, presenceLeave, serverGenerateStart, serverGenerateStatus, serverGenerateCancel, serverAutoGraphStart, serverAutoGraphStatus } from "./storage.js";
 import { MANUAL_POLICY, isGymRoomByPolicy, manualPolicyFlags } from "./manualPolicy.js";
 import { dedupePublicLessonRows } from "./publicLessonDedupe.js";
 import { selectAggregateTeachers } from "./teacherAggregate.js";
@@ -564,16 +565,38 @@ function graphStateFromLoads(loads = []) {
 }
 
 
+function normalizedPublicConfig(raw) {
+  const c = raw || {};
+  return {
+    activeDays: Array.isArray(c.activeDays) ? c.activeDays : [true, true, true, true, true, false, false],
+    periodsPerDay: Number(c.periodsPerDay) || 6,
+    periodTimes: Array.isArray(c.periodTimes) ? c.periodTimes : [
+      "08:00–09:30", "09:40–11:10", "11:30–13:00", "13:30–15:00", "15:10–16:40", "16:50–18:20",
+    ],
+    voznesenskyPeriodTimes: Array.isArray(c.voznesenskyPeriodTimes) ? c.voznesenskyPeriodTimes : [...DEFAULT_VOZNESENSKY_PERIOD_TIMES],
+    shortenedPeriodTimes: Array.isArray(c.shortenedPeriodTimes) ? c.shortenedPeriodTimes : [
+      "08:00–09:10", "09:20–10:30", "10:40–11:50", "12:00–13:10", "13:20–14:30", "14:40–15:50",
+    ],
+    shortenedDates: Array.isArray(c.shortenedDates) ? c.shortenedDates : [],
+    semesterStart: c.semesterStart || "",
+    semesterEnd: c.semesterEnd || "",
+    weekParityOverrides: c.weekParityOverrides && typeof c.weekParityOverrides === "object" ? c.weekParityOverrides : {},
+    holidays: Array.isArray(c.holidays) ? c.holidays : [],
+    ...c,
+    dailyLoadRules: normalizedDailyLoadRules(c),
+    peExtraPairAllowed: c.peExtraPairAllowed !== false,
+  };
+}
+
 function normalizePublicStoredData(raw) {
   // v1637: public contour must not run the editor's migration/reconciliation pipeline.
   // Published snapshots are already coherent. Running normalizeStoredData here rebuilt
   // instances, graph mirrors and legacy load migrations on every visitor's device and
   // was a major source of the long white-screen load on phones.
   const data = raw || {};
-  const config = data.config || {};
   return {
     ...data,
-    config: { ...config, dailyLoadRules: normalizedDailyLoadRules(config), peExtraPairAllowed: config.peExtraPairAllowed !== false },
+    config: normalizedPublicConfig(data.config),
     specialties: Array.isArray(data.specialties) ? data.specialties : [],
     groups: (data.groups || []).map((g) => ({ educationBase: "9", programSemesters: (g.educationBase || "9") === "11" ? 6 : 8, curriculumSemester: 1, subgroupCount: 2, profile: "", ...g })),
     teachers: (data.teachers || []).map((t) => ({ profile: "", employmentType: "staff", ...t, preferredRoomIds: Array.isArray(t.preferredRoomIds) ? t.preferredRoomIds : [] })),
@@ -13193,7 +13216,7 @@ function SchedulePanel({ data, set, generating, generationStatus, onGenerate, on
     if (viewKind !== "allGroups" && viewKind !== "semesterAll" && viewId && !list.find((x) => x.id === viewId)) setViewId("");
   }, [viewKind, filterSpec, list.length]); // eslint-disable-line
 
-  const activeDayIndices = data.config.activeDays.map((on, i) => (on ? i : null)).filter((v) => v !== null);
+  const activeDayIndices = (data?.config?.activeDays || [true, true, true, true, true, false, false]).map((on, i) => (on ? i : null)).filter((v) => v !== null);
   const selectedWeekMonday = data.config.semesterStart && totalWeeksInSchedule > 0
     ? addDays(mondayOf(data.config.semesterStart), (scheduleWeek - 1) * 7)
     : null;
@@ -25600,7 +25623,7 @@ function ReadOnlySchedule({ data, kind, initialViewId = "", initialSpecialtyRout
     if (window.location.pathname !== target) window.history.replaceState(null, "", target + window.location.search);
   }, [syncUrl, kind, viewId, selSpecialty, selYear]);
 
-  const activeDayIndices = data.config.activeDays.map((on, i) => (on ? i : null)).filter((v) => v !== null);
+  const activeDayIndices = (data?.config?.activeDays || [true, true, true, true, true, false, false]).map((on, i) => (on ? i : null)).filter((v) => v !== null);
   const byId = (arr, id) => arr.find((x) => x.id === id);
   const groupBellPresetForDay = (groupId, day, dateStr = "", parityOverride = null) => {
     const custom = groupPeriodTimesForDay(data, groupId, day, dateStr, parityOverride);
@@ -26773,6 +26796,12 @@ export default function App() {
   const [data, setData] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [fullDataLoaded, setFullDataLoaded] = useState(false);
+  const editorLoadedRef = useRef(false);
+  const editorEditSerialRef = useRef(0);
+  const editorHydrationRef = useRef(Promise.resolve());
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorLoadError, setEditorLoadError] = useState("");
+  const editorReadyForTab = !editorMissingSections(data, editorTabSections(tab)).length;
   const [publicUserCount, setPublicUserCount] = useState(0);
   const [publicPaused, setPublicPaused] = useState(false);
   const [publicPausedMessage, setPublicPausedMessage] = useState("");
@@ -27073,6 +27102,8 @@ export default function App() {
   };
 
   const persistSnapshot = (snapshot, revision, { manual = false, scopeTab = tab, scheduleGroupId = "" } = {}) => {
+    const required = scopeTab === "__all__" ? EDITOR_SECTIONS : (saveKeysForTab(scopeTab) || []);
+    if (editorMissingSections(snapshot, required).length) return Promise.reject(new Error("Раздел ещё загружается; сохранение отложено"));
     const graphEditSerialAtRequest = scopeTab === "graphs" ? graphUserEditSerialRef.current : null;
     // Собираем снимок от последней серверной базы и накладываем только данные
     // текущей страницы. Так несохранённые/устаревшие поля других страниц не
@@ -27479,6 +27510,9 @@ export default function App() {
     const canonicalJson = typeof res.value === "string" ? res.value : JSON.stringify(res.value);
     skipAutosaveRef.current = true;
     const normalized = normalizeStoredData(parsed);
+    normalized._editorDeferred = parsed._editorDeferred || res.deferredSections || [];
+    setEditorDeferred(normalized._editorDeferred);
+    editorLoadedRef.current = true;
     latestDataRef.current = normalized;
     setData(normalized);
     lastSavedJson.current = canonicalJson;
@@ -27496,13 +27530,111 @@ export default function App() {
     return true;
   };
 
-  const ensureFullDataLoaded = async () => {
-    if (fullDataLoaded && latestDataRef.current) return latestDataRef.current;
-    const res = await storageGetStrict("schedule-data-v2", { editorCompact: true });
-    if (applyFullStorageResponse(res)) return res.value;
-    if (res?.missing) { setStorageMissing(true); throw new Error("Рабочее хранилище не найдено"); }
-    throw new Error("Не удалось загрузить рабочие данные");
+  const ensureEditorLoaded = async () => {
+    if (editorLoadedRef.current) return latestDataRef.current;
+    const response = await editorBootstrapGet();
+    response.value._editorDeferred = response.deferredSections || response.value._editorDeferred || [];
+    if (!applyFullStorageResponse(response)) throw new Error("Не удалось загрузить редактор");
+    return latestDataRef.current;
   };
+
+  const flushEditorChanges = async () => {
+    clearTimeout(saveTimer.current);
+    for (const timer of pageSaveTimersRef.current.values()) clearTimeout(timer);
+    pageSaveTimersRef.current.clear();
+    if (graphSaveTimerRef.current) clearTimeout(graphSaveTimerRef.current);
+    graphSaveTimerRef.current = null;
+    await saveChainRef.current.catch(() => {});
+    await scheduleCellPatchChainRef.current.catch(() => {});
+    for (const scopeTab of [...pendingSaveTabsRef.current]) {
+      await persistSnapshot(latestDataRef.current, pageSaveRevisionRef.current.get(scopeTab), {
+        scopeTab, scheduleGroupId: scopeTab === "schedule" ? scheduleRouteGroupIdRef.current : "",
+      });
+    }
+    if (pendingSaveTabsRef.current.size) throw new Error("Дождитесь сохранения изменений перед загрузкой раздела");
+  };
+
+  const applyEditorHydration = (response) => {
+    const next = normalizeStoredData(response.value);
+    next._editorDeferred = response.value._editorDeferred || [];
+    setEditorDeferred(next._editorDeferred);
+    storageRememberCellRevisions("schedule-data-v2", response.cellRevisions);
+    skipAutosaveRef.current = true;
+    latestDataRef.current = next;
+    lastSavedJson.current = JSON.stringify(response.value);
+    lastSavedTokenRef.current = syncTokenOf(response.value);
+    suppressUndoRef.current = true;
+    undoRef.current = [];
+    redoRef.current = [];
+    lastUndoDataRef.current = next;
+    setData(next);
+    setRemoteChanged(false);
+    return next;
+  };
+
+  const loadEditorSections = async (wanted) => {
+    await ensureEditorLoaded();
+    if (!editorMissingSections(latestDataRef.current, wanted).length) return latestDataRef.current;
+    await flushEditorChanges();
+    const revision = dataRevisionRef.current;
+    const editSerial = editorEditSerialRef.current;
+    const alreadyLoaded = EDITOR_SECTIONS.filter(section => !editorMissingSections(latestDataRef.current, [section]).length);
+    const required = [...new Set([...wanted, ...alreadyLoaded])];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const bootstrap = await editorBootstrapGet();
+        const response = await editorHydrate(bootstrap.value, bootstrap.token, required);
+        if (editSerial !== editorEditSerialRef.current || revision !== dataRevisionRef.current || pendingSaveTabsRef.current.size) throw new Error("Данные изменены во время загрузки; повторите переход");
+        return applyEditorHydration(response);
+      } catch (error) {
+        if (error.status !== 409 || attempt === 2 || editSerial !== editorEditSerialRef.current || revision !== dataRevisionRef.current || pendingSaveTabsRef.current.size) throw error;
+      }
+    }
+  };
+
+  const ensureEditorSections = (wanted) => {
+    const task = editorHydrationRef.current.catch(() => {}).then(() => loadEditorSections(wanted));
+    editorHydrationRef.current = task;
+    return task;
+  };
+
+  const ensureFullDataLoaded = async () => {
+    setEditorLoading(true);
+    try {
+      await flushEditorChanges();
+      return await ensureEditorSections(EDITOR_SECTIONS);
+    } finally { setEditorLoading(false); }
+  };
+
+  const prepareFullEditor = async () => {
+    try { return await ensureFullDataLoaded(); }
+    catch (error) { setShortcutNote(`Не удалось загрузить проект: ${error.message}`); return null; }
+  };
+
+  const downloadEditorProject = async () => {
+    try { await flushEditorChanges(); await editorExportDownload(); }
+    catch (error) { setShortcutNote(error.message); }
+  };
+
+  const retryEditorTab = async () => {
+    setEditorLoading(true);
+    setEditorLoadError("");
+    try { await ensureEditorSections(editorTabSections(tab)); }
+    catch (error) { setEditorLoadError(error.message); }
+    finally { setEditorLoading(false); }
+  };
+
+  useEffect(() => {
+    if (!loaded || role !== "admin") return;
+    if (editorReadyForTab) { setEditorLoading(false); return; }
+    let cancelled = false;
+    setEditorLoading(true);
+    setEditorLoadError("");
+    ensureEditorSections(editorTabSections(tab)).catch(error => {
+      if (!cancelled) setEditorLoadError(error.message);
+    }).finally(() => { if (!cancelled) setEditorLoading(false); });
+    return () => { cancelled = true; };
+  }, [loaded, role, tab, editorReadyForTab]);
 
   const loadPublicScheduleTarget = async (kind, id, week = 0, scope = "semester") => {
     if (fullDataLoaded || !id) return;
@@ -27557,13 +27689,14 @@ export default function App() {
         if (isAdminEntryUrl()) {
           const session = await authRequest("session");
           if (session.user) {
-            await ensureFullDataLoaded();
+            await ensureEditorLoaded();
             setCurrentUser(session.user);
+            setTab(pendingAdminTab || "semester");
             setRole("admin");
             return;
           }
           setPublicUserCount(session.setupRequired ? 0 : 1);
-          latestDataRef.current = normalizeStoredData({});
+          latestDataRef.current = normalizePublicStoredData({});
           setData(latestDataRef.current);
           setLoaded(true);
           setPasswordModal(session.setupRequired ? "set" : "enter");
@@ -27605,14 +27738,14 @@ export default function App() {
         }
         const session = await authRequest("session");
         if (session.setupRequired) {
-          latestDataRef.current = normalizeStoredData({});
+          latestDataRef.current = normalizePublicStoredData({});
           setData(latestDataRef.current);
           setLoaded(true);
           setPasswordModal("set");
           return;
         }
         if (session.user) {
-          await ensureFullDataLoaded();
+          await ensureEditorLoaded();
           setCurrentUser(session.user);
           setRole("admin");
           return;
@@ -27630,12 +27763,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!loaded || !data) return;
+    if (!loaded || !data || role !== "admin") return;
     if (skipAutosaveRef.current) {
       skipAutosaveRef.current = false;
       if (pendingSaveTabsRef.current.size === 0) { dirtyRef.current = false; setSaveState("saved"); }
       return;
     }
+    if (!editorReadyForTab || editorLoading) return;
     // В «Графиках» само изменение объекта data больше не означает пользовательскую правку.
     // Только graphSet увеличивает serial. Поэтому server merge, normalizeStoredData и
     // syncScheduleInstancesToGraph не возвращают ложный статус «не сохранено».
@@ -27687,7 +27821,7 @@ export default function App() {
   // every click. When the editor leaves timetable for another page, refresh the
   // server base once in the background without touching visible React state.
   useEffect(() => {
-    if (!loaded || role !== "admin" || tab === "schedule" || !scheduleBaseDirtyRef.current) return;
+    if (!loaded || role !== "admin" || tab === "schedule" || !editorReadyForTab || !scheduleBaseDirtyRef.current) return;
     let cancelled = false;
     (async () => {
       try {
@@ -27845,7 +27979,7 @@ export default function App() {
         try {
           const session = await authRequest("session");
           const restored = session.user;
-          if (restored) await ensureFullDataLoaded();
+          if (restored) await ensureEditorLoaded();
           if (restored) {
             setCurrentUser(restored);
             setRole("admin");
@@ -27892,7 +28026,7 @@ export default function App() {
       if (!setupToken) return;
       const result = await authRequest("setup", { name, login, password: pw1, setupToken });
       sessionUser = result.user;
-      await ensureFullDataLoaded();
+      await ensureEditorLoaded();
     } catch (error) { setPwError(error.message); return; }
     finishServerLogin(sessionUser);
   };
@@ -27901,7 +28035,7 @@ export default function App() {
     try {
       const result = await authRequest("login", { login, password: pw });
       sessionUser = result.user;
-      await ensureFullDataLoaded();
+      await ensureEditorLoaded();
     } catch (error) { setPwError(error.message); return; }
     finishServerLogin(sessionUser);
   };
@@ -27967,6 +28101,7 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e) => {
+      if (role === "admin" && (!editorReadyForTab || editorLoading)) return;
       const tag = e.target?.tagName?.toLowerCase();
       const typing = tag === "input" || tag === "textarea" || e.target?.isContentEditable;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -27976,14 +28111,14 @@ export default function App() {
       }
       if (typing) return;
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
-        e.preventDefault(); const prev=undoRef.current.pop(); if(!prev)return; redoRef.current.push(data); suppressUndoRef.current=true; setData(prev); setShortcutNote("Отменено"); setTimeout(()=>setShortcutNote(""),1200); return;
+        e.preventDefault(); const prev=undoRef.current.pop(); if(!prev)return; redoRef.current.push(data); suppressUndoRef.current=true; editorEditSerialRef.current += 1; setData(prev); setShortcutNote("Отменено"); setTimeout(()=>setShortcutNote(""),1200); return;
       }
       if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) {
-        e.preventDefault(); const next=redoRef.current.pop(); if(!next)return; undoRef.current.push(data); suppressUndoRef.current=true; setData(next); setShortcutNote("Возвращено"); setTimeout(()=>setShortcutNote(""),1200);
+        e.preventDefault(); const next=redoRef.current.pop(); if(!next)return; undoRef.current.push(data); suppressUndoRef.current=true; editorEditSerialRef.current += 1; setData(next); setShortcutNote("Возвращено"); setTimeout(()=>setShortcutNote(""),1200);
       }
     };
     window.addEventListener("keydown", onKey); return ()=>window.removeEventListener("keydown", onKey);
-  }, [data]);
+  }, [data, tab, role, editorLoading, editorReadyForTab]);
 
 
   // v1637: MUST stay above every conditional return in App.
@@ -28196,7 +28331,9 @@ export default function App() {
 
   const SECTION_NAMES = { consultations:"Консультации", schedule:"Расписание", substitutions:"Замены", retakes:"Архив пересдач", interimAssessments:"Аттестация", practices:"Практики", loads:"Нагрузки", curriculumPlan:"Учебный план", config:"Настройки семестра", groups:"Группы", teachers:"Преподаватели", rooms:"Аудитории" };
   const appendHistory = (d, section, action, details = "") => ({ ...(d || {}), changeHistory: [...((d && d.changeHistory) || []), { id: uid(), at: new Date().toISOString(), user: currentUser?.name || currentUser?.login || "Сотрудник", section, action, details }].slice(-1000) });
-  const set = (key) => (val) => setData((d) => {
+  const set = (key) => (val) => {
+    editorEditSerialRef.current += 1;
+    setData((d) => {
     const nextValue = typeof val === "function" ? val(d[key]) : val;
     let next = { ...d, [key]: nextValue };
     // v1837 PERF CORE: schedule cell edits already have their own atomic audit
@@ -28206,7 +28343,8 @@ export default function App() {
     // for normal pages; significant schedule operations append explicit history.
     if (SECTION_NAMES[key] && role === "admin" && key !== "schedule") next = appendHistory(next, SECTION_NAMES[key], "Изменено");
     return next;
-  });
+    });
+  };
 
   // v1565: manual timetable cells are committed independently of the page
   // debounce.  Only the named assignment/locked/unplaced IDs are written under
@@ -28921,6 +29059,7 @@ export default function App() {
   };
 
   const runGenerate = async (groupId = "", options = {}) => {
+    if (!await prepareFullEditor()) return;
     const fastMode = !!options?.fastMode;
     const weekNumber = Math.max(0, Number(options?.weekNumber || 0));
     if (generating || !data) return;
@@ -29079,6 +29218,7 @@ export default function App() {
   };
 
   const undoRestoreGroupToPublished = async (groupId) => {
+    if (!await prepareFullEditor()) return;
     const gid = String(groupId || "");
     const current = latestDataRef.current || data;
     if (!gid || !current) return;
@@ -29134,6 +29274,7 @@ export default function App() {
   };
 
   const restoreGroupToPublished = async (groupId) => {
+    if (!await prepareFullEditor()) return;
     const gid = String(groupId || "");
     const current = latestDataRef.current || data;
     if (!gid || !current) return;
@@ -29200,6 +29341,7 @@ export default function App() {
   };
 
   const publishSchedule = async (options = { scope: "all" }) => {
+    if (!await prepareFullEditor()) return;
     // v1863: the substitutions page uses a debounce. If the operator clicks
     // «Опубликовать» immediately after «Отменить», merely waiting for the
     // already-running save chain is not enough: the debounce may not have fired
@@ -29704,11 +29846,13 @@ export default function App() {
   };
 
   const restoreVersion = async (version) => {
+    if (!await prepareFullEditor()) return;
     if (!version?.id) return;
     try {
       const fullVersion = version?.snapshot ? version : await storageVersionGet("schedule-data-v2", version.id);
       if (!fullVersion?.snapshot) throw new Error("Снимок версии не найден");
-      const keep = { users: data.users || [], changeHistory: data.changeHistory || [], scheduleVersions: data.scheduleVersions || [], publishedSnapshot: data.publishedSnapshot, publishedAt: data.publishedAt, publishedBy: data.publishedBy };
+      const current = latestDataRef.current;
+      const keep = { users: current.users || [], changeHistory: current.changeHistory || [], scheduleVersions: current.scheduleVersions || [], publishedSnapshot: current.publishedSnapshot, publishedAt: current.publishedAt, publishedBy: current.publishedBy };
       const restored = normalizeStoredData({ ...JSON.parse(JSON.stringify(fullVersion.snapshot)), ...keep });
       setData(appendHistory(restored, "Версии", "Восстановлен черновик", `Версия от ${new Date(fullVersion.at || version.at).toLocaleString("ru-RU")}`));
     } catch (e) {
@@ -29717,7 +29861,8 @@ export default function App() {
     }
   };
 
-  const startNewSemester = () => {
+  const startNewSemester = async () => {
+    if (!await prepareFullEditor()) return;
     if (!data || typeof data !== "object") {
       setShortcutNote("Новый семестр не создан: данные ещё не загружены");
       setTimeout(() => setShortcutNote(""), 3000);
@@ -29962,6 +30107,7 @@ export default function App() {
               );
             })}
           </nav>
+          <button className="sidebar-exit" onClick={downloadEditorProject} disabled={editorLoading}>Скачать полный проект</button>
           <button className="sidebar-new-semester" onClick={() => setNewSemesterModal(true)} title="Архивировать текущий семестр и начать новый">
             <CalendarDays size={16} /><span>Новый семестр</span>
           </button>
@@ -30039,11 +30185,18 @@ export default function App() {
           {role === "admin" && (
             <div className="section-save-bar">
               <div><b>Изменения этой страницы сохраняются отдельно</b><span>Кнопка ниже сразу сохраняет только изменённые разделы, не перезаписывая остальные страницы.</span></div>
-              <button className="btn primary section-save-btn" onClick={saveNow} disabled={saveState === "saving"}>💾 {saveState === "saving" ? "Сохраняю…" : "Сохранить"}</button>
+              <button className="btn primary section-save-btn" onClick={saveNow} disabled={saveState === "saving" || !editorReadyForTab || editorLoading}>💾 {saveState === "saving" ? "Сохраняю…" : "Сохранить"}</button>
               <span style={{fontSize:12,fontWeight:700,color:saveState==="error"?"#b91c1c":saveState==="dirty"?"#a16207":saveState==="saving"?"#1d4ed8":"#15803d"}}>{saveState==="error"?"⚠ не удалось сохранить":saveState==="dirty"?"● есть несохранённые изменения":saveState==="saving"?"↻ сохраняю на сервер…":`✓ всё сохранено${lastConfirmedSaveAt ? ` · ${new Date(lastConfirmedSaveAt).toLocaleTimeString("ru-RU", {hour:"2-digit", minute:"2-digit", second:"2-digit"})}` : ""}`}</span>
             </div>
           )}
-          {role === "admin" && (
+          {role === "admin" && (!editorReadyForTab || editorLoading) && (
+            <div className="section" role="status" aria-live="polite">
+              <h2>{editorLoadError ? "Не удалось загрузить раздел" : "Загружаю данные раздела…"}</h2>
+              <p>{editorLoadError || "Сохранённые изменения останутся на сервере. Дождитесь загрузки перед редактированием."}</p>
+              {editorLoadError && <button className="btn primary" onClick={retryEditorTab}>Повторить загрузку</button>}
+            </div>
+          )}
+          {role === "admin" && editorReadyForTab && !editorLoading && (
             <>
               {tab === "semester" && <SemesterPanel config={data.config} setConfig={set("config")} />}
               {tab === "constraints" && <DailyConstraintsPanel data={data} set={set} />}

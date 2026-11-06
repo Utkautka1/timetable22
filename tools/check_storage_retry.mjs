@@ -1,5 +1,7 @@
 /** Проверяет, что сбои транспорта повторяются, а конфликты сохранения сразу видны пользователю. */
 import assert from 'node:assert/strict';
+import { setEditorDeferred } from '../frontend/src/editorTransport.js';
+setEditorDeferred([]);
 import { storageGetStrict, storageSet } from '../frontend/src/storage.js';
 
 const originalFetch = globalThis.fetch;

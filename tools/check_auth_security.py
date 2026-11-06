@@ -148,11 +148,11 @@ class ApplicationAuthTests(unittest.TestCase):
 
     def test_actual_private_routes(self):
         """Production storage/restore endpoints закрыты до чтения базы и файлов."""
-        for url in ("/api/storage/schedule-data-v2", "/api/storage-backups", "/api/storage-diagnostics"):
+        for url in ("/api/storage/schedule-data-v2?editor=1", "/api/storage-backups", "/api/storage-diagnostics"):
             self.assertEqual(self.client.get(url).status_code, 401)
         self.assertEqual(self.client.post("/api/storage-backups/storage_fake.json/restore").status_code, 401)
         self.login()
-        result = self.client.get("/api/storage/schedule-data-v2")
+        result = self.client.get("/api/storage/schedule-data-v2?editor=1")
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.headers["Cache-Control"], "no-store")
         self.assertEqual(self.client.post("/api/storage-backups/storage_fake.json/restore").status_code, 403)
@@ -160,7 +160,7 @@ class ApplicationAuthTests(unittest.TestCase):
     def test_storage_role_escalation(self):
         """Обычный admin не повышает роль ни merge, ни полной заменой."""
         self.login()
-        project = self.client.get("/api/storage/schedule-data-v2").get_json()["value"]
+        project = self.client.get("/api/storage/schedule-data-v2?editor=1").get_json()["value"]
         forged = copy.deepcopy(project)
         forged["users"][0]["role"] = "superadmin"
         result = self.client.post("/api/storage-section-merge/schedule-data-v2", json=dict(base=project, local=dict(users=forged["users"])))
@@ -203,7 +203,7 @@ class ApplicationAuthTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/test-race").status_code, 200)
         saved = self.module.load_store()["schedule-data-v2"]
         self.assertEqual(saved["users"][0]["passwordHash"], "changed-concurrently")
-        self.assertEqual(self.client.get("/api/storage/schedule-data-v2").status_code, 401)
+        self.assertEqual(self.client.get("/api/storage/schedule-data-v2?editor=1").status_code, 401)
 
     def test_bounded_gzip(self):
         """Лимит применяется к распакованным байтам, даже если HTTP тело мало."""

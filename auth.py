@@ -98,6 +98,14 @@ def current_user(users):
     return None
 
 
+def is_local_dev(origin, expected):
+    """Разрешает связку локального dev-сервера фронтенда и API без HTTPS."""
+    if current_app.config["SESSION_COOKIE_SECURE"]:
+        return False
+    hosts = {"127.0.0.1", "localhost"}
+    return origin.hostname in hosts and expected.hostname in hosts
+
+
 def same_origin():
     """Отсекает браузерные cross-site изменения, включая login CSRF.
 
@@ -112,8 +120,11 @@ def same_origin():
         if value:
             origin = urlsplit(value)
             # TLS завершается на reverse proxy: HTTPS допустим при Secure cookie.
-            scheme_ok = origin.scheme == expected.scheme or (origin.scheme == "https" and current_app.config["SESSION_COOKIE_SECURE"])
-            return origin.scheme in {"http", "https"} and origin.netloc == expected.netloc and scheme_ok
+            scheme_ok = origin.scheme == expected.scheme or (
+                origin.scheme == "https" and current_app.config["SESSION_COOKIE_SECURE"]
+            )
+            netloc_ok = origin.netloc == expected.netloc or is_local_dev(origin, expected)
+            return origin.scheme in {"http", "https"} and netloc_ok and scheme_ok
     return request.headers.get("Sec-Fetch-Site") in {None, "same-origin", "none"}
 
 

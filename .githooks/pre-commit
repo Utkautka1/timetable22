@@ -1,7 +1,10 @@
 #!/bin/sh
-# Не пропускает регрессии контроля доступа и повторов запросов в новый коммит.
+# Не пропускает регрессии контроля доступа, оптимизации данных и повторов запросов в новый коммит.
 set -eu
 python3 tools/check_auth_security.py
+python3 tools/check_editor_transport.py
+python3 tools/check_editor_integration.py
+node tools/check_editor_client.mjs
 node tools/check_storage_retry.mjs
 node tools/check_custom_weeks.mjs
 git diff --cached --check

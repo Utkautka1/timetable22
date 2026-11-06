@@ -17,9 +17,11 @@ from pg_compat import pg_connect, pg_storage_exists
 import re
 from collections import OrderedDict
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory, Response, g, has_request_context
+from flask import Flask, request, jsonify, send_from_directory, Response, g, has_request_context, redirect
 from werkzeug.exceptions import Forbidden
 from auth import install_auth
+from editor_state import complete_project, partial_write_error, project_for_editor
+from editor_transport import install_editor_transport
 
 # В контейнере путь задаётся явно через DATA_DIR=/data. Локально без переменной
 # сохраняем данные рядом с приложением.
@@ -2409,6 +2411,8 @@ def save_store(store, backup=True, durable=True, refresh_public=True, refresh_st
     # transaction, so readers never observe a half-written project and there is
     # no storage.json temp-file/rename race. JSON backups remain available for
     # human inspection and one-click restore.
+    if isinstance(store.get("schedule-data-v2"), dict):
+        store["schedule-data-v2"] = complete_project(store["schedule-data-v2"])
     _authorize_user_changes(store)
     os.makedirs(DATA_DIR, exist_ok=True)
     if backup and _storage_exists():
@@ -2449,6 +2453,7 @@ def _save_store_key_fast(key, value, durable=False, revision_map=None, revision_
     exactly as they were for cell patches.
     """
     if str(key) == "schedule-data-v2":
+        value = complete_project(value)
         value = _authorize_user_changes({str(key): value})[str(key)]
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = _sqlite_connect()
@@ -2684,39 +2689,98 @@ def _authorize_user_changes(store):
 
 
 install_auth(app, DATA_DIR, _auth_read_users, _auth_update_users, _lock)
+app.before_request(partial_write_error)
 
+def _editor_read_project(key):
+    """Связывает кеш проекта с ревизией транзакционной строки, а не identity dict."""
+    store = load_store()
+    if key not in store:
+        return None
+    raw = store[key]
+    project = json.loads(raw) if isinstance(raw, str) else raw
+    conn = _sqlite_connect()
+    try:
+        row = conn.execute("SELECT updated_at FROM kv_store WHERE key=?", (key,)).fetchone()
+    finally:
+        conn.close()
+    return project, str(row[0]) if row else "missing"
+
+
+def _editor_matches_scope(project, instance, group_id, week):
+    """Повторяет правила рабочего расписания, включая потоки и недели нагрузки."""
+    weeks = _instance_weeks_for_project_py(project, instance)
+    if week and week not in weeks:
+        return False
+    if not group_id:
+        return True
+    selected_weeks = [week] if week else weeks
+    groups = _schedule_instance_group_ids_for_weeks_py(project, instance, selected_weeks)
+    return str(group_id) in {str(identifier) for identifier in groups}
+
+
+def _stream_project_json(project):
+    """Пакует JSON в блоки, чтобы экспорт не создавал ещё одну полную строку в RAM."""
+    encoder = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"))
+    buffer, length = [], 0
+    for part in encoder.iterencode(project):
+        buffer.append(part)
+        length += len(part)
+        if length >= 65536:
+            yield "".join(buffer)
+            buffer, length = [], 0
+    if buffer:
+        yield "".join(buffer)
+
+
+@app.get("/api/editor/<key>/export")
+def editor_export(key):
+    """Выгружает полный переносимый проект, включая отдельно хранимую историю."""
+    with _lock:
+        store = load_store()
+        if key not in store:
+            return jsonify(error="Проект не найден"), 404
+        portable = _store_with_snapshots_for_backup(store)
+        raw = portable[key]
+        project = json.loads(raw) if isinstance(raw, str) else raw
+    response = Response(_stream_project_json(project), content_type="application/json; charset=utf-8")
+    response.headers["Content-Disposition"] = 'attachment; filename="timetable-project.json"'
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+install_editor_transport(app, _editor_read_project, _lock,
+    matches_scope=_editor_matches_scope, cell_revisions=_schedule_cell_revisions_get)
+
+
+
+
+def _editor_version_metadata(row):
+    """Сохраняет метаданные истории; сами снимки загружаются отдельным запросом."""
+    snapshot = row.get("snapshot") if isinstance(row.get("snapshot"), dict) else {}
+    stats = ((snapshot.get("schedule") or {}).get("stats") or {})
+    return {
+        **{key: row.get(key) for key in ("id", "at", "by", "note")},
+        "placed": row.get("placed", stats.get("placed")),
+        "hasSnapshot": bool(snapshot) or row.get("hasSnapshot") is True,
+    }
 
 
 def _editor_compact_project(data):
-    """Return editor payload without historical publication snapshots.
-
-    scheduleVersions can contain dozens of full semester snapshots and was the
-    largest source of browser RAM use.  Keep only metadata in ordinary editor
-    responses; the selected snapshot is fetched lazily by id when restoring.
-    """
+    """Не отправляет историю снимков и ещё не запрошенные редактором разделы."""
     if not isinstance(data, dict):
         return data
     out = dict(data)
-    compact_versions = []
-    for row in (data.get("scheduleVersions") or []):
-        if not isinstance(row, dict):
-            continue
-        snapshot = row.get("snapshot") if isinstance(row.get("snapshot"), dict) else {}
-        stats = ((snapshot.get("schedule") or {}).get("stats") or {}) if isinstance(snapshot, dict) else {}
-        compact_versions.append({
-            "id": row.get("id"),
-            "at": row.get("at"),
-            "by": row.get("by"),
-            "note": row.get("note"),
-            "placed": stats.get("placed"),
-            "hasSnapshot": bool(snapshot) or row.get("hasSnapshot") is True,
-        })
-    out["scheduleVersions"] = compact_versions
-    return out
+    out["scheduleVersions"] = [
+        _editor_version_metadata(row) for row in data.get("scheduleVersions") or []
+        if isinstance(row, dict)
+    ]
+    return project_for_editor(out)
 
 
 @app.get("/api/storage/<key>")
 def get_key(key):
+    if key == "schedule-data-v2" and not request.args.get("editor") and request.args.get("full") != "1":
+        return redirect("/api/editor/schedule-data-v2?section=bootstrap", code=307)
     with _lock:
         store = load_store()
         if key not in store:
@@ -2733,7 +2797,7 @@ def get_key(key):
                 save_store(backup_store, backup=False, refresh_public=True)
                 return jsonify({
                     "key": key,
-                    "value": backup_store[key],
+                    "value": _editor_compact_project(backup_store[key]) if request.args.get("editor") else backup_store[key],
                     "recovered": True,
                     "backup": backup_name,
                 })
@@ -2809,7 +2873,7 @@ def get_key_meta(key):
 
 
 
-CURRENT_SCHEDULE_CLIENT_BUILD = 1895
+CURRENT_SCHEDULE_CLIENT_BUILD = 1896
 # Short compatibility grace: during an active scheduling session a tab can lag
 # behind several rapid deploys.  Keep the last three editor builds writable;
 # the UI independently detects the newer build and reloads itself.  Very old
@@ -2873,6 +2937,8 @@ def set_key(key):
             incoming_value = json.loads(incoming_value)
         except Exception:
             return jsonify({"error": "Не удалось разобрать данные расписания"}), 422
+    if key == "schedule-data-v2":
+        incoming_value = complete_project(incoming_value)
     with _lock:
         # Пересборка/перезапуск приложения НИКОГДА не должна молча создавать новое
         # storage.json. Если постоянный диск почему-то не примонтирован или файл пропал,
@@ -4220,7 +4286,7 @@ def storage_section_merge(key):
         # an fsync/public-status penalty on every small editor change.
         _maybe_periodic_backup_async()
         save_store(store, backup=False, durable=False, refresh_public=False, refresh_status=False)
-    return jsonify({"ok": True, "token": str(merged["_syncMeta"]["saveId"]), "value": merged})
+    return jsonify({"ok": True, "token": str(merged["_syncMeta"]["saveId"]), "value": _editor_compact_project(merged)})
 
 
 
@@ -5751,7 +5817,7 @@ def storage_graph_merge(key):
         # an fsync/public-status penalty on every small editor change.
         _maybe_periodic_backup_async()
         save_store(store, backup=False, durable=False, refresh_public=False, refresh_status=False)
-    return jsonify({"ok": True, "token": str(merged["_syncMeta"]["saveId"]), "value": merged})
+    return jsonify({"ok": True, "token": str(merged["_syncMeta"]["saveId"]), "value": _editor_compact_project(merged)})
 
 
 
@@ -7818,7 +7884,7 @@ def storage_schedule_group_merge(key):
 
     return jsonify({
         "ok": True,
-        "value": _editor_compact_project(remote) if bool(meta.get("compact")) else remote,
+        "value": _editor_compact_project(remote),
         "token": sync_meta["saveId"],
         "conflicts": conflicts[:100],
         "hadConflicts": bool(conflicts),
@@ -7882,7 +7948,7 @@ def storage_schedule_merge(key):
     return jsonify({
         "ok": True,
         "token": str(merged["_syncMeta"]["saveId"]),
-        "value": _editor_compact_project(merged) if bool(meta.get("compact")) else merged,
+        "value": _editor_compact_project(merged),
         "conflicts": sorted(set(merge_conflicts))[:200],
         "hadConflicts": bool(merge_conflicts),
     })

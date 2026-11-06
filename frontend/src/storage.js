@@ -1,12 +1,13 @@
 /** Сохраняет совместное расписание через API, сохраняя конфликты и временные сбои различимыми. */
-export const CLIENT_BUILD_ID = "1895";
+import { storageFetch, getEditorDeferred } from "./editorTransport.js";
+export const CLIENT_BUILD_ID = "1896";
 
 // Замена window.storage (доступной только внутри артефактов Claude) на настоящий
 // backend API. Тот же смысл: get(key) / set(key, value), данные общие для всех.
 
 export async function storageGet(key) {
   try {
-    const res = await fetch(`/api/storage/${encodeURIComponent(key)}`);
+    const res = await storageFetch(`/api/storage/${encodeURIComponent(key)}`);
     if (!res.ok) return null; // 404 — ключа ещё нет, это нормально при первом запуске
     return await res.json(); // { key, value }
   } catch (e) {
@@ -17,7 +18,7 @@ export async function storageGet(key) {
 
 export async function storageMeta(key) {
   try {
-    const res = await fetch(`/api/storage-meta/${encodeURIComponent(key)}`, {
+    const res = await storageFetch(`/api/storage-meta/${encodeURIComponent(key)}`, {
       cache: "no-store",
       headers: { "Cache-Control": "no-cache" },
     });
@@ -73,6 +74,10 @@ const rememberCellRevisions = (key, revisions) => {
   scheduleCellRevisionCache.set(String(key), current);
   scheduleCellRevisionReady.add(String(key));
 };
+export function storageRememberCellRevisions(key, revisions) {
+  rememberCellRevisions(key, revisions);
+}
+
 const touchedSchedulePatchIds = (patch) => {
   const ids = new Set();
   for (const id of Object.keys(patch?.assignmentSet || {})) ids.add(String(id));
@@ -107,7 +112,7 @@ async function retryStorage(operation, attempts, delayMs) {
 
 async function readStrictStorage(key, editorCompact, finalAttempt) {
   const qs = editorCompact ? "?editor=1" : "";
-  const res = await fetch(`/api/storage/${encodeURIComponent(key)}${qs}`, {
+  const res = await storageFetch(`/api/storage/${encodeURIComponent(key)}${qs}`, {
     cache: "no-store", headers: { "Cache-Control": "no-cache" },
   });
   if (res.status === 404) return { key, value: null, missing: true, status: 404 };
@@ -134,14 +139,14 @@ export async function storageGetStrict(key, options = {}) {
 }
 
 export async function storageVersionGet(key, versionId) {
-  const res = await fetch(`/api/storage-version/${encodeURIComponent(key)}/${encodeURIComponent(versionId)}`, { cache: "no-store" });
+  const res = await storageFetch(`/api/storage-version/${encodeURIComponent(key)}/${encodeURIComponent(versionId)}`, { cache: "no-store" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Не удалось загрузить версию: HTTP ${res.status}`);
   return data?.version || null;
 }
 
 export async function scheduleArchiveList(key = "schedule-data-v2") {
-  const res = await fetch(`/api/schedule-archive/${encodeURIComponent(key)}`, { cache: "no-store" });
+  const res = await storageFetch(`/api/schedule-archive/${encodeURIComponent(key)}`, { cache: "no-store" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Не удалось загрузить архив публикаций: HTTP ${res.status}`);
   return {
@@ -151,7 +156,7 @@ export async function scheduleArchiveList(key = "schedule-data-v2") {
 }
 
 export async function scheduleFinalizeWeek(key, week, meta = {}) {
-  const res = await fetch(`/api/schedule-archive/${encodeURIComponent(key)}/finalize-week`, {
+  const res = await storageFetch(`/api/schedule-archive/${encodeURIComponent(key)}/finalize-week`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ week, meta }),
@@ -163,7 +168,7 @@ export async function scheduleFinalizeWeek(key, week, meta = {}) {
 }
 
 export async function scheduleArchiveGet(key, archiveKind, archiveId) {
-  const res = await fetch(`/api/schedule-archive/${encodeURIComponent(key)}/${encodeURIComponent(archiveKind)}/${encodeURIComponent(archiveId)}`, {
+  const res = await storageFetch(`/api/schedule-archive/${encodeURIComponent(key)}/${encodeURIComponent(archiveKind)}/${encodeURIComponent(archiveId)}`, {
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
@@ -189,7 +194,7 @@ export async function scheduleArchiveDownload(key, archiveKind, archiveId) {
 }
 
 export async function storageCreateBackup(userId) {
-  const res = await fetch("/api/storage-backups/create", {
+  const res = await storageFetch("/api/storage-backups/create", {
     method: "POST",
     cache: "no-store",
     headers: { "X-Admin-User-Id": String(userId || "") },
@@ -200,14 +205,14 @@ export async function storageCreateBackup(userId) {
 }
 
 export async function storageBackups() {
-  const res = await fetch("/api/storage-backups", { cache: "no-store" });
+  const res = await storageFetch("/api/storage-backups", { cache: "no-store" });
   if (!res.ok) throw new Error(`Не удалось получить резервные копии: HTTP ${res.status}`);
   const data = await res.json();
   return Array.isArray(data?.backups) ? data.backups : [];
 }
 
 export async function storageDownloadBackup(name, userId) {
-  const res = await fetch(`/api/storage-backups/${encodeURIComponent(name)}/download`, {
+  const res = await storageFetch(`/api/storage-backups/${encodeURIComponent(name)}/download`, {
     cache: "no-store",
     headers: { "X-Admin-User-Id": String(userId || "") },
   });
@@ -230,7 +235,7 @@ export async function storageDownloadBackup(name, userId) {
 }
 
 export async function storageRestoreBackup(name) {
-  const res = await fetch(`/api/storage-backups/${encodeURIComponent(name)}/restore`, { method: "POST" });
+  const res = await storageFetch(`/api/storage-backups/${encodeURIComponent(name)}/restore`, { method: "POST" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Не удалось восстановить резервную копию: HTTP ${res.status}`);
   return data;
@@ -240,7 +245,7 @@ export async function storageRestorePublishedGroup(key, groupId, meta = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 45000);
   try {
-    const res = await fetch(`/api/storage-restore-published-group/${encodeURIComponent(key)}`, {
+    const res = await storageFetch(`/api/storage-restore-published-group/${encodeURIComponent(key)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ groupId, meta }),
@@ -263,7 +268,7 @@ export async function storageUndoPublishedGroupRestore(key, groupId, meta = {}) 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 45000);
   try {
-    const res = await fetch(`/api/storage-undo-published-group/${encodeURIComponent(key)}`, {
+    const res = await storageFetch(`/api/storage-undo-published-group/${encodeURIComponent(key)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ groupId, meta }),
@@ -300,7 +305,7 @@ async function saveStorageRequest(url, request, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { method: "POST", ...request, signal: controller.signal });
+    const res = await storageFetch(url, { method: "POST", ...request, signal: controller.signal });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw apiErrorFromResponse(data, `Ошибка сохранения: HTTP ${res.status}`, res.status);
     return data;
@@ -313,6 +318,9 @@ async function saveStorageRequest(url, request, timeoutMs) {
 }
 
 export async function storageSet(key, value, options = {}) {
+  if (getEditorDeferred().length && !options.allowCreate) {
+    throw Object.assign(new Error("Сначала загрузите проект целиком"), { status: 409 });
+  }
   const qs = new URLSearchParams({ raw: "1" });
   if (options.allowCreate) qs.set("allow_create", "1");
   const url = `/api/storage/${encodeURIComponent(key)}?${qs.toString()}`;
@@ -327,7 +335,7 @@ export async function storageSet(key, value, options = {}) {
 // v1498: generic atomic page-section merge. Each admin page sends only the
 // sections it owns, together with the exact base snapshot used to make the edit.
 export async function storageSectionMerge(key, base, local, meta = {}) {
-  const res = await fetch(`/api/storage-section-merge/${encodeURIComponent(key)}`, {
+  const res = await storageFetch(`/api/storage-section-merge/${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ base, local, meta }),
@@ -375,7 +383,7 @@ export async function storageSchedulePatch(key, patch = {}, meta = {}) {
     // window and retry only once for genuine transient gateway/network failures.
     const timer = setTimeout(() => controller.abort(), 52000);
     try {
-      const res = await fetch(`/api/storage-schedule-patch/${encodeURIComponent(key)}`, {
+      const res = await storageFetch(`/api/storage-schedule-patch/${encodeURIComponent(key)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Client-Build": CLIENT_BUILD_ID },
         body: JSON.stringify({ patch: patchWithRevision, meta: requestMeta }),
@@ -406,7 +414,7 @@ export async function storageSchedulePatch(key, patch = {}, meta = {}) {
 
 
 export async function storagePublicationCommit(key, payload = {}, meta = {}) {
-  const res = await fetch(`/api/storage-publication-commit/${encodeURIComponent(key)}`, {
+  const res = await storageFetch(`/api/storage-publication-commit/${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, meta }),
@@ -421,7 +429,7 @@ export async function storagePublicationCommit(key, payload = {}, meta = {}) {
 }
 
 export async function storagePublishWeeks(key, weeks = [], meta = {}) {
-  const res = await fetch(`/api/storage-publish-weeks/${encodeURIComponent(key)}`, {
+  const res = await storageFetch(`/api/storage-publish-weeks/${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ weeks, meta }),
@@ -444,7 +452,7 @@ export async function storageScheduleGroupMerge(key, groupId, base, local, meta 
   let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(`/api/storage-schedule-group-merge/${encodeURIComponent(key)}`, {
+      const res = await storageFetch(`/api/storage-schedule-group-merge/${encodeURIComponent(key)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Client-Build": CLIENT_BUILD_ID },
         body: JSON.stringify({ groupId, base, local, meta: payloadMeta }),
@@ -468,7 +476,7 @@ export async function storageScheduleGroupMerge(key, groupId, base, local, meta 
 }
 
 export async function storageScheduleMerge(key, base, local, meta = {}) {
-  const res = await fetch(`/api/storage-schedule-merge/${encodeURIComponent(key)}`, {
+  const res = await storageFetch(`/api/storage-schedule-merge/${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "X-Client-Build": CLIENT_BUILD_ID },
     body: JSON.stringify({ base, local, meta }),
@@ -487,7 +495,7 @@ export async function storageScheduleMerge(key, base, local, meta = {}) {
 // holding the storage lock, so debounce order between browsers cannot erase
 // another employee's graph edits.
 export async function storageGraphMerge(key, base, local, meta = {}) {
-  const res = await fetch(`/api/storage-graph-merge/${encodeURIComponent(key)}`, {
+  const res = await storageFetch(`/api/storage-graph-merge/${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ base, local, meta }),
@@ -517,7 +525,7 @@ export async function storageGraphPatch(key, changes = [], historyAppend = [], m
   const requestMeta = { ...(meta || {}), requestId };
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const res = await fetch(`/api/storage-graph-patch/${encodeURIComponent(key)}`, {
+      const res = await storageFetch(`/api/storage-graph-patch/${encodeURIComponent(key)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Client-Build": CLIENT_BUILD_ID },
         body: JSON.stringify({ changes, historyAppend, meta: requestMeta, schedulePatch }),
@@ -539,7 +547,7 @@ export async function storageGraphPatch(key, changes = [], historyAppend = [], m
 
 export async function presenceHeartbeat(payload) {
   try {
-    const res = await fetch("/api/presence/heartbeat", {
+    const res = await storageFetch("/api/presence/heartbeat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -555,7 +563,7 @@ export async function presenceHeartbeat(payload) {
 
 export async function presenceGet() {
   try {
-    const res = await fetch("/api/presence");
+    const res = await storageFetch("/api/presence");
     if (!res.ok) return [];
     const data = await res.json();
     return data.active || [];
@@ -573,14 +581,14 @@ export function presenceLeave(sessionId) {
       navigator.sendBeacon("/api/presence/leave", new Blob([body], { type: "application/json" }));
       return;
     }
-    fetch("/api/presence/leave", { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true }).catch(() => {});
+    storageFetch("/api/presence/leave", { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true }).catch(() => {});
   } catch { /* TTL всё равно снимет статус */ }
 }
 
 export async function serverGenerateStart(payload = {}) {
   // Only a tiny command is sent. The server reads the already saved project
   // snapshot itself, avoiding HTTP 413 on large semesters.
-  const res = await fetch('/api/schedule/generate', {
+  const res = await storageFetch('/api/schedule/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ storageKey: payload.storageKey || 'schedule-data-v2', groupId: payload.groupId || '', fastMode: !!payload.fastMode, weekNumber: Number(payload.weekNumber || 0) }),
@@ -592,14 +600,14 @@ export async function serverGenerateStart(payload = {}) {
 
 export async function serverGenerateStatus(jobId, afterProgress = 0) {
   const suffix = Number(afterProgress) > 0 ? `?after_progress=${encodeURIComponent(Number(afterProgress))}` : '';
-  const res = await fetch(`/api/schedule/generate/${encodeURIComponent(jobId)}${suffix}`, { cache: 'no-store' });
+  const res = await storageFetch(`/api/schedule/generate/${encodeURIComponent(jobId)}${suffix}`, { cache: 'no-store' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Не удалось получить статус расчёта: HTTP ${res.status}`);
   return data;
 }
 
 export async function serverGenerateCancel(jobId) {
-  const res = await fetch(`/api/schedule/generate/${encodeURIComponent(jobId)}/cancel`, {
+  const res = await storageFetch(`/api/schedule/generate/${encodeURIComponent(jobId)}/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: '{}',
@@ -610,7 +618,7 @@ export async function serverGenerateCancel(jobId) {
 }
 
 export async function serverAutoGraphStart(payload = {}) {
-  const res = await fetch('/api/graphs/auto-group', {
+  const res = await storageFetch('/api/graphs/auto-group', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -626,7 +634,7 @@ export async function serverAutoGraphStart(payload = {}) {
 }
 
 export async function serverAutoGraphStatus(jobId) {
-  const res = await fetch(`/api/graphs/auto-group/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
+  const res = await storageFetch(`/api/graphs/auto-group/${encodeURIComponent(jobId)}`, { cache: 'no-store' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Не удалось получить статус автографика: HTTP ${res.status}`);
   return data;
@@ -635,7 +643,7 @@ export async function serverAutoGraphStatus(jobId) {
 
 export async function publicIndexGet() {
   try {
-    const res = await fetch(`/api/public-index?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+    const res = await storageFetch(`/api/public-index?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
@@ -650,7 +658,7 @@ export async function publicScheduleGet(kind, id, options = {}) {
     const scope = options?.scope === 'week' && Number(options?.week) > 0 ? 'week' : 'semester';
     const qs = scope === 'week' ? `?scope=week&week=${encodeURIComponent(Number(options.week))}` : '?scope=semester';
     const sep = qs.includes('?') ? '&' : '?';
-    const res = await fetch(`/api/public-schedule/${safeKind}/${encodeURIComponent(String(id || ''))}${qs}${sep}_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+    const res = await storageFetch(`/api/public-schedule/${safeKind}/${encodeURIComponent(String(id || ''))}${qs}${sep}_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
@@ -661,7 +669,7 @@ export async function publicScheduleGet(kind, id, options = {}) {
 
 export async function publicStatusGet() {
   try {
-    const res = await fetch(`/api/public-status?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+    const res = await storageFetch(`/api/public-status?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
@@ -674,7 +682,7 @@ export async function publicBootstrapGet() {
   try {
     // v1628: публичный bootstrap имеет короткий HTTP cache + ETag на сервере.
     // Не запрещаем браузеру использовать его: повторные открытия заметно быстрее.
-    const res = await fetch(`/api/public-bootstrap?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
+    const res = await storageFetch(`/api/public-bootstrap?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache' } });
     if (!res.ok) return null;
     return await res.json();
   } catch (e) {
@@ -688,14 +696,14 @@ export async function publicBootstrapGet() {
 // heavy schedule project. This keeps public visitors away from the app while
 // administrators are doing intensive timetable work.
 export async function publicControlGet() {
-  const res = await fetch(`/api/public-control?_t=${Date.now()}`, { cache: "no-store", headers: { "Cache-Control": "no-cache" } });
+  const res = await storageFetch(`/api/public-control?_t=${Date.now()}`, { cache: "no-store", headers: { "Cache-Control": "no-cache" } });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Не удалось получить состояние публичного контура: HTTP ${res.status}`);
   return data;
 }
 
 export async function publicControlSet(paused, userId) {
-  const res = await fetch('/api/public-control', {
+  const res = await storageFetch('/api/public-control', {
     method: 'POST',
     cache: 'no-store',
     headers: {

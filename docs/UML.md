@@ -1,6 +1,6 @@
 # UML проекта timetable22
 
-Обновлено: 2026-11-06 — серверная авторизация и единая точка входа API.
+Обновлено: 2026-11-06 — разделение 50+ МБ проекта на легкий bootstrap, частичную загрузку разделов и потоковый экспорт.
 
 ## Компоненты
 
@@ -8,8 +8,12 @@
 flowchart LR
     Browser[frontend/src/App.jsx] --> AuthClient[frontend/src/auth.js]
     Browser --> StorageClient[frontend/src/storage.js]
+    Browser --> EditorClient[frontend/src/editorTransport.js]
     AuthClient --> Auth[auth.py]
     StorageClient --> API[app.py]
+    EditorClient --> API
+    API --> EditorTransport[editor_transport.py]
+    API --> EditorState[editor_state.py]
     Legacy[tools/app.py] --> API
     API --> Auth
     Auth --> Key[DATA_DIR session signing key]
@@ -52,8 +56,10 @@ flowchart TD
     Guard --> AuthRoutes[auth session login logout setup]
     Guard --> Session[current_user]
     Session --> Private[Storage presence generators diagnostics]
+    Session --> EditorTransportRoutes[Editor bootstrap sections schedule export]
     Session --> Superadmin[Superadmin user changes and backup restore]
-    Private --> Writes[Atomic storage writes]
+    Private --> PartialCheck[partial_write_error and complete_project]
+    PartialCheck --> Writes[Atomic storage writes]
     Superadmin --> Writes
 ```
 
@@ -65,7 +71,11 @@ flowchart TD
 | POST /api/auth/setup | Первый администратор по AUTH_SETUP_TOKEN |
 | POST /api/auth/password | Смена собственного пароля |
 | GET /api/public-* | Опубликованные данные по явному списку |
-| /api/storage* | Закрытый редакторский контур |
+| GET /api/editor/\<key\>?section=bootstrap | Быстрый bootstrap (~71 КБ gzip) без тяжёлых разделов |
+| GET /api/editor/\<key\>?section=\<s\>&token=\<t\> | Посекционная загрузка (loads, schedule, graphState и др.) |
+| GET /api/editor/\<key\>/schedule?groupId=\<id\>&week=\<w\> | Рабочие occurrences конкретной группы/недели |
+| GET /api/editor/\<key\>/export | Потоковая выгрузка полного переносимого проекта |
+| /api/storage* | Закрытый редакторский контур (защита от неполной перезаписи) |
 | /api/schedule/*, /api/graphs/* | Закрытые серверные планировщики |
 
 Сессия подписана постоянным ключом. Пароль и роль сверяются с хранилищем на
