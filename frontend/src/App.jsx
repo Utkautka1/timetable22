@@ -26813,7 +26813,7 @@ const ADMIN_TABS = [
 const TAB_SAVE_KEYS = {
   semester: ["config"],
   constraints: ["config"],
-  announcements: ["announcements"],
+  announcements: ["announcements", "publicIntroText"],
   consultations: ["consultations"],
   lists: ["groups","teachers","rooms","subjects","lessonTypes","specialties","employmentTypes"],
   curriculum: ["curriculumPlan"],
