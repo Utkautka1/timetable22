@@ -1,3 +1,4 @@
+/** Сохраняет совместное расписание через API, сохраняя конфликты и временные сбои различимыми. */
 export const CLIENT_BUILD_ID = "1895";
 
 // Замена window.storage (доступной только внутри артефактов Claude) на настоящий
@@ -85,77 +86,51 @@ const touchedSchedulePatchIds = (patch) => {
 // Строгая загрузка с повторными попытками. Во время redeploy reverse-proxy Amvera
 // может несколько секунд отвечать 502/503 или оборвать запрос, хотя рабочий storage
 // на постоянном диске никуда не делся. Такие ответы нельзя трактовать как отсутствие данных.
-export async function storageGetStrict(key, options = {}) {
-  const attempts = Math.max(1, Number(options.attempts || 8));
-  const delayMs = Math.max(100, Number(options.delayMs || 850));
-  let lastError = null;
+const TRANSIENT_STORAGE_STATUSES = new Set([425, 429, 500, 502, 503, 504]);
 
+function storageAttempts(value, fallback) {
+  const count = Number(value);
+  return Number.isFinite(count) && count >= 1 ? Math.floor(count) : fallback;
+}
+
+async function retryStorage(operation, attempts, delayMs) {
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const qs = options.editorCompact ? "?editor=1" : "";
-      const res = await fetch(`/api/storage/${encodeURIComponent(key)}${qs}`, {
-        cache: "no-store",
-        headers: { "Cache-Control": "no-cache" },
-      });
-      if (res.status === 404) return { key, value: null, missing: true, status: 404 };
-
-      if (!res.ok) {
-        const detail = await res.json().catch(() => ({}));
-        const err = new Error(detail?.error || `Ошибка загрузки данных: HTTP ${res.status}`);
-        err.status = res.status;
-        // 5xx/429/425 могут быть переходным состоянием при пересборке.
-        if ([425, 429, 500, 502, 503, 504].includes(res.status) && attempt < attempts) {
-          lastError = err;
-          await sleep(delayMs * attempt);
-          continue;
-        }
-        throw err;
-      }
-
-      let payload;
-      try {
-        payload = await res.json();
-      } catch (e) {
-        const err = new Error("Сервер хранения вернул неполный ответ");
-        if (attempt < attempts) {
-          lastError = err;
-          await sleep(delayMs * attempt);
-          continue;
-        }
-        throw err;
-      }
-
-      if (!payload || typeof payload !== "object" || !("value" in payload)) {
-        const err = new Error("Сервер хранения вернул ответ без поля данных");
-        if (attempt < attempts) {
-          lastError = err;
-          await sleep(delayMs * attempt);
-          continue;
-        }
-        throw err;
-      }
-
-      // Пустой существующий ключ тоже не считаем «новой базой». Повторяем запрос,
-      // а затем отдаём отдельный признак, чтобы пользователь мог восстановить backup.
-      if (payload.value === null || payload.value === "") {
-        if (attempt < attempts) {
-          lastError = new Error("Ключ хранилища временно пуст");
-          await sleep(delayMs * attempt);
-          continue;
-        }
-        return { ...payload, empty: true, status: 200 };
-      }
-      if (payload.cellRevisions) rememberCellRevisions(key, payload.cellRevisions);
-      return { ...payload, status: 200 };
-    } catch (e) {
-      lastError = e;
-      if (attempt < attempts) {
-        await sleep(delayMs * attempt);
-        continue;
-      }
+      return await operation(attempt === attempts);
+    } catch (error) {
+      const status = Number(error?.status || 0);
+      if (attempt === attempts || (status && !TRANSIENT_STORAGE_STATUSES.has(status))) throw error;
+      await sleep(delayMs * attempt);
     }
   }
-  throw lastError || new Error("Сервер хранения недоступен");
+}
+
+async function readStrictStorage(key, editorCompact, finalAttempt) {
+  const qs = editorCompact ? "?editor=1" : "";
+  const res = await fetch(`/api/storage/${encodeURIComponent(key)}${qs}`, {
+    cache: "no-store", headers: { "Cache-Control": "no-cache" },
+  });
+  if (res.status === 404) return { key, value: null, missing: true, status: 404 };
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw apiErrorFromResponse(detail, `Ошибка загрузки данных: HTTP ${res.status}`, res.status);
+  }
+  const payload = await res.json().catch(() => { throw new Error("Сервер хранения вернул неполный ответ"); });
+  if (!payload || typeof payload !== "object" || !("value" in payload)) {
+    throw new Error("Сервер хранения вернул ответ без поля данных");
+  }
+  if (payload.value === null || payload.value === "") {
+    if (!finalAttempt) throw new Error("Ключ хранилища временно пуст");
+    return { ...payload, empty: true, status: 200 };
+  }
+  if (payload.cellRevisions) rememberCellRevisions(key, payload.cellRevisions);
+  return { ...payload, status: 200 };
+}
+
+export async function storageGetStrict(key, options = {}) {
+  const attempts = storageAttempts(options.attempts, 8);
+  const delayMs = Math.max(100, Number(options.delayMs) || 850);
+  return retryStorage((finalAttempt) => readStrictStorage(key, options.editorCompact, finalAttempt), attempts, delayMs);
 }
 
 export async function storageVersionGet(key, versionId) {
@@ -307,61 +282,46 @@ export async function storageUndoPublishedGroupRestore(key, groupId, meta = {}) 
   }
 }
 
-export async function storageSet(key, value, options = {}) {
-  const qs = new URLSearchParams();
-  if (options.allowCreate) qs.set("allow_create", "1");
-  qs.set("raw", "1");
-  const url = `/api/storage/${encodeURIComponent(key)}?${qs.toString()}`;
-  const text = typeof value === "string" ? value : JSON.stringify(value);
-  const attempts = Math.max(1, Number(options.attempts || 3));
-  const timeoutMs = Math.max(5000, Number(options.timeoutMs || 60000));
-
-  let body = text;
+async function storageSaveBody(text, baseToken) {
   const headers = { "Content-Type": "application/json; charset=utf-8" };
-  if (options.baseToken) headers["X-Base-Token"] = String(options.baseToken);
-  if (text.length > 128 * 1024 && typeof CompressionStream !== "undefined") {
-    try {
-      const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
-      body = new Uint8Array(await new Response(stream).arrayBuffer());
-      headers["Content-Encoding"] = "gzip";
-    } catch (e) {
-      console.warn("gzip save compression unavailable, using plain payload", e);
-      body = text;
-    }
+  if (baseToken) headers["X-Base-Token"] = String(baseToken);
+  if (text.length <= 128 * 1024 || typeof CompressionStream === "undefined") return { body: text, headers };
+  try {
+    const stream = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+    const body = new Uint8Array(await new Response(stream).arrayBuffer());
+    return { body, headers: { ...headers, "Content-Encoding": "gzip" } };
+  } catch (error) {
+    console.warn("gzip save compression unavailable, using plain payload", error);
+    return { body: text, headers };
   }
-
-  let lastError = null;
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const res = await fetch(url, { method: "POST", headers, body, signal: controller.signal });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const err = new Error(data?.error || `Ошибка сохранения: HTTP ${res.status}`);
-        err.status = res.status;
-        if ([425, 429, 500, 502, 503, 504].includes(res.status) && attempt < attempts) {
-          lastError = err;
-          await sleep(600 * attempt);
-          continue;
-        }
-        throw err;
-      }
-      return data;
-    } catch (e) {
-      lastError = e?.name === "AbortError" ? new Error("Сохранение не завершилось за отведённое время") : e;
-      if (attempt < attempts) {
-        await sleep(600 * attempt);
-        continue;
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  console.error("storageSet failed", lastError);
-  throw lastError || new Error("Не удалось сохранить данные");
 }
 
+async function saveStorageRequest(url, request, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { method: "POST", ...request, signal: controller.signal });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw apiErrorFromResponse(data, `Ошибка сохранения: HTTP ${res.status}`, res.status);
+    return data;
+  } catch (error) {
+    if (error?.name === "AbortError") throw new Error("Сохранение не завершилось за отведённое время");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function storageSet(key, value, options = {}) {
+  const qs = new URLSearchParams({ raw: "1" });
+  if (options.allowCreate) qs.set("allow_create", "1");
+  const url = `/api/storage/${encodeURIComponent(key)}?${qs.toString()}`;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  const request = await storageSaveBody(text, options.baseToken);
+  const attempts = storageAttempts(options.attempts, 3);
+  const timeoutMs = Math.max(5000, Number(options.timeoutMs) || 60000);
+  return retryStorage(() => saveStorageRequest(url, request, timeoutMs), attempts, 600);
+}
 
 
 // v1498: generic atomic page-section merge. Each admin page sends only the

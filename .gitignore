@@ -1,0 +1,12 @@
+# Локальные данные и ключ подписи сессий не должны попадать в Git.
+.env
+.env.*
+!.env.example
+data/
+logs/
+__pycache__/
+*.py[cod]
+.venv/
+node_modules/
+frontend/dist/
+static/

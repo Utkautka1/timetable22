@@ -1,3 +1,5 @@
+/** Интерфейс редактора и публичного расписания; рабочие данные доступны после серверного входа. */
+import { authRequest } from "./auth.js";
 import { useState, useEffect, useRef, useMemo, useDeferredValue, Fragment, startTransition } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx-js-style";
@@ -27547,34 +27549,25 @@ export default function App() {
     return window.location.pathname.split("/").filter(Boolean)[0] === "admin";
   };
 
-  // v1675: keep a successful admin login across refreshes and direct admin
-  // links in the SAME browser tab/session. Only a user id is stored; on every
-  // restore it is revalidated against the current canonical users list, so a
-  // deleted/demoted user cannot survive indefinitely in stale React state.
-  const rememberAdminSession = (user) => {
-    try {
-      if (user?.id) sessionStorage.setItem("timetable-admin-session-v1675", JSON.stringify({ userId: String(user.id) }));
-    } catch {}
-  };
-  const forgetAdminSession = () => {
-    try { sessionStorage.removeItem("timetable-admin-session-v1675"); } catch {}
-  };
-  const restoreAdminSession = (users) => {
-    try {
-      const saved = JSON.parse(sessionStorage.getItem("timetable-admin-session-v1675") || "null");
-      const user = (users || []).find((u) => String(u?.id || "") === String(saved?.userId || "") && ["admin", "superadmin"].includes(String(u?.role || "")));
-      return user ? { id: user.id, name: user.name, login: user.login, role: user.role } : null;
-    } catch { return null; }
-  };
-
   useEffect(() => {
     (async () => {
       try {
         // Публичная стартовая страница получает только опубликованное расписание и справочники,
         // а не многомегабайтный редакторский проект. Полные данные грузятся только при входе сотрудника.
         if (isAdminEntryUrl()) {
-          const res = await storageGetStrict("schedule-data-v2", { editorCompact: true });
-          if (applyFullStorageResponse(res)) return;
+          const session = await authRequest("session");
+          if (session.user) {
+            await ensureFullDataLoaded();
+            setCurrentUser(session.user);
+            setRole("admin");
+            return;
+          }
+          setPublicUserCount(session.setupRequired ? 0 : 1);
+          latestDataRef.current = normalizeStoredData({});
+          setData(latestDataRef.current);
+          setLoaded(true);
+          setPasswordModal(session.setupRequired ? "set" : "enter");
+          return;
         }
         // v1643: public contour starts from a small dictionaries-only index.
         // The actual schedule is fetched only for the group/teacher the visitor
@@ -27610,11 +27603,21 @@ export default function App() {
           setStorageProblem(null);
           return;
         }
-        // Старый сервер / временная несовместимость: безопасный fallback на полную загрузку.
-        const res = await storageGetStrict("schedule-data-v2", { editorCompact: true });
-        if (applyFullStorageResponse(res)) return;
-        if (res?.missing) { setStorageMissing(true); setLoaded(false); return; }
-        throw new Error("Получен неизвестный ответ сервера хранения");
+        const session = await authRequest("session");
+        if (session.setupRequired) {
+          latestDataRef.current = normalizeStoredData({});
+          setData(latestDataRef.current);
+          setLoaded(true);
+          setPasswordModal("set");
+          return;
+        }
+        if (session.user) {
+          await ensureFullDataLoaded();
+          setCurrentUser(session.user);
+          setRole("admin");
+          return;
+        }
+        throw new Error("Опубликованное расписание недоступно. Для входа сотрудника откройте /admin");
       } catch (e) {
         console.error("Initial storage load failed", e);
         const message = e?.message || "Не удалось загрузить данные с сервера";
@@ -27840,9 +27843,9 @@ export default function App() {
     if (loaded && isAdminEntryUrl() && role !== "admin") {
       (async () => {
         try {
-          await ensureFullDataLoaded();
-          const users = latestDataRef.current?.users || [];
-          const restored = restoreAdminSession(users);
+          const session = await authRequest("session");
+          const restored = session.user;
+          if (restored) await ensureFullDataLoaded();
           if (restored) {
             setCurrentUser(restored);
             setRole("admin");
@@ -27853,7 +27856,7 @@ export default function App() {
             setPasswordModal(null);
             return;
           }
-          setPasswordModal(publicUserCount > 0 || users.length > 0 ? "enter" : "set");
+          setPasswordModal(session.setupRequired ? "set" : "enter");
         } catch (e) { setLoadError(e?.message || "Не удалось загрузить данные для входа"); }
       })();
     }
@@ -27862,16 +27865,17 @@ export default function App() {
   const enterAdmin = async () => {
     setPwError("");
     try {
-      await ensureFullDataLoaded();
-      const users = latestDataRef.current?.users || [];
-      setPasswordModal(users.length > 0 ? "enter" : "set");
+      const session = await authRequest("session");
+      setPasswordModal(session.setupRequired ? "set" : "enter");
     } catch (e) {
       setLoadError(e?.message || "Не удалось загрузить данные для входа");
     }
   };
-  const exitAdmin = () => {
+  const exitAdmin = async () => {
+    try { await authRequest("logout", {}); }
+    catch (error) { setLoadError(error.message); return; }
     presenceLeave(presenceSessionRef.current);
-    forgetAdminSession();
+    window.location.replace("/");
     setRole("student");
     setCurrentUser(null);
     if (typeof window !== "undefined") window.history.replaceState(null, "", "/");
@@ -27880,33 +27884,35 @@ export default function App() {
   const submitCreateFirstUser = async (name, login, pw1, pw2) => {
     if (!name.trim()) return setPwError("Укажите имя");
     if (!login.trim()) return setPwError("Укажите логин");
-    if (pw1.length < 4) return setPwError("Пароль должен быть не короче 4 символов");
+    if (pw1.length < 8) return setPwError("Пароль должен быть не короче 8 символов");
     if (pw1 !== pw2) return setPwError("Пароли не совпадают");
-    const hash = await sha256Hex(pw1);
-    const user = { id: uid(), name: name.trim(), login: login.trim(), passwordHash: hash, role: "superadmin" };
-    setData((d) => ({ ...d, users: [...(d.users || []), user] }));
-    const sessionUser = { id: user.id, name: user.name, login: user.login, role: user.role };
-    setCurrentUser(sessionUser);
-    rememberAdminSession(sessionUser);
-    setRole("admin");
-    // v1641: only applied once login has actually succeeded — see the
-    // pendingAdminTab declaration above for why this can never skip auth.
-    if (pendingAdminTab) setTab(pendingAdminTab);
-    if (typeof window !== "undefined") window.history.replaceState(null, "", pendingAdminTab === "schedule" && scheduleRouteGroupId ? `/admin/schedule/group/${encodeURIComponent(scheduleRouteGroupId)}` : `/admin/${pendingAdminTab || "semester"}`);
-    setPasswordModal(null);
-    setPwError("");
+    let sessionUser;
+    try {
+      const setupToken = window.prompt("Введите AUTH_SETUP_TOKEN, заданный на сервере");
+      if (!setupToken) return;
+      const result = await authRequest("setup", { name, login, password: pw1, setupToken });
+      sessionUser = result.user;
+      await ensureFullDataLoaded();
+    } catch (error) { setPwError(error.message); return; }
+    finishServerLogin(sessionUser);
   };
   const submitLogin = async (login, pw) => {
-    const user = (data.users || []).find((u) => u.login.toLowerCase() === login.trim().toLowerCase());
-    if (!user) return setPwError("Пользователь не найден");
-    const hash = await sha256Hex(pw);
-    if (hash !== user.passwordHash) return setPwError("Неверный пароль");
-    const sessionUser = { id: user.id, name: user.name, login: user.login, role: user.role };
-    setCurrentUser(sessionUser);
-    rememberAdminSession(sessionUser);
+    let sessionUser;
+    try {
+      const result = await authRequest("login", { login, password: pw });
+      sessionUser = result.user;
+      await ensureFullDataLoaded();
+    } catch (error) { setPwError(error.message); return; }
+    finishServerLogin(sessionUser);
+  };
+  const finishServerLogin = (user) => {
+    setCurrentUser(user);
     setRole("admin");
     if (pendingAdminTab) setTab(pendingAdminTab);
-    if (typeof window !== "undefined") window.history.replaceState(null, "", pendingAdminTab === "schedule" && scheduleRouteGroupId ? `/admin/schedule/group/${encodeURIComponent(scheduleRouteGroupId)}` : `/admin/${pendingAdminTab || "semester"}`);
+    const target = pendingAdminTab === "schedule" && scheduleRouteGroupId
+      ? `/admin/schedule/group/${encodeURIComponent(scheduleRouteGroupId)}`
+      : `/admin/${pendingAdminTab || "semester"}`;
+    window.history.replaceState(null, "", target);
     setPasswordModal(null);
     setPwError("");
   };
@@ -27925,16 +27931,12 @@ export default function App() {
     if (window.location.pathname !== target) window.history.replaceState(null, "", target);
   }, [role, tab, scheduleRouteGroupId, browserNavApplying]);
   const submitChangePassword = async (oldPw, pw1, pw2) => {
-    const me = (data.users || []).find((u) => u.id === currentUser?.id);
-    if (!me) return setPwError("Сессия истекла, войдите заново");
-    const oldHash = await sha256Hex(oldPw);
-    if (oldHash !== me.passwordHash) return setPwError("Текущий пароль неверен");
-    if (pw1.length < 4) return setPwError("Новый пароль должен быть не короче 4 символов");
+    if (pw1.length < 8) return setPwError("Новый пароль должен быть не короче 8 символов");
     if (pw1 !== pw2) return setPwError("Пароли не совпадают");
-    const hash = await sha256Hex(pw1);
-    setData((d) => ({ ...d, users: (d.users || []).map((u) => (u.id === me.id ? { ...u, passwordHash: hash } : u)) }));
-    setPasswordModal(null);
-    setPwError("");
+    try {
+      await authRequest("password", { oldPassword: oldPw, password: pw1 });
+    } catch (error) { setPwError(error.message); return; }
+    window.location.reload();
   };
 
   useEffect(() => { scheduleRouteGroupIdRef.current = scheduleRouteGroupId; }, [scheduleRouteGroupId]);
@@ -30280,7 +30282,7 @@ function UsersPanel({ data, set, currentUser, activeUsers = [] }) {
     if (!form.name.trim()) return setFormError("Укажите имя");
     if (!form.login.trim()) return setFormError("Укажите логин");
     if (users.some((u) => u.login.toLowerCase() === form.login.trim().toLowerCase())) return setFormError("Такой логин уже занят");
-    if (form.password.length < 4) return setFormError("Пароль должен быть не короче 4 символов");
+    if (form.password.length < 8) return setFormError("Пароль должен быть не короче 8 символов");
     const hash = await sha256Hex(form.password);
     const newUser = { id: uid(), name: form.name.trim(), login: form.login.trim(), passwordHash: hash, role: form.role };
     set("users")([...users, newUser]);

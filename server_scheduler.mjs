@@ -219,7 +219,7 @@ function instanceAppliesToDate(config, inst, dateStr) {
   if (pattern === "all") return true;
   if (pattern === "custom") {
     const n = weekNumberOf(config.semesterStart, dateStr);
-    return n !== null && (inst.customWeeks || []).includes(n);
+    return n !== null && (inst.customWeeks || []).some((week) => Number(week) === Number(n));
   }
   if (pattern === "perWeek") {
     const n = weekNumberOf(config.semesterStart, dateStr);
@@ -238,7 +238,7 @@ function weekNumbersForInstance(config, inst) {
   const total = totalSemesterWeeks(config);
   if (!total) return [];
   const pattern = inst?.weekPattern || "all";
-  if (pattern === "custom") return (inst.customWeeks || []).map(Number).filter((n) => n >= 1 && n <= total).slice().sort((a,b)=>a-b);
+  if (pattern === "custom") return [...new Set((inst.customWeeks || []).map(Number).filter((n) => Number.isFinite(n) && n >= 1 && n <= total))].sort((a,b)=>a-b);
   if (pattern === "perWeek") {
     const wp = inst?.weeklyPairs || {};
     return Object.keys(wp).map(Number).filter((n) => n >= 1 && n <= total && Number(wp[n] || wp[String(n)] || 0) > 0).sort((a,b)=>a-b);

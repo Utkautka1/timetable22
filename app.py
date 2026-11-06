@@ -1,3 +1,4 @@
+"""Сохраняет расписание атомарно и отделяет публичные публикации от редакторского API."""
 import os
 import json
 import threading
@@ -7,6 +8,7 @@ import subprocess
 import uuid
 import time
 import gzip
+import io
 import hashlib
 import tempfile
 import select
@@ -15,7 +17,9 @@ from pg_compat import pg_connect, pg_storage_exists
 import re
 from collections import OrderedDict
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import Flask, request, jsonify, send_from_directory, Response, g, has_request_context
+from werkzeug.exceptions import Forbidden
+from auth import install_auth
 
 # В контейнере путь задаётся явно через DATA_DIR=/data. Локально без переменной
 # сохраняем данные рядом с приложением.
@@ -2405,6 +2409,7 @@ def save_store(store, backup=True, durable=True, refresh_public=True, refresh_st
     # transaction, so readers never observe a half-written project and there is
     # no storage.json temp-file/rename race. JSON backups remain available for
     # human inspection and one-click restore.
+    _authorize_user_changes(store)
     os.makedirs(DATA_DIR, exist_ok=True)
     if backup and _storage_exists():
         _backup_current_store()
@@ -2443,6 +2448,8 @@ def _save_store_key_fast(key, value, durable=False, revision_map=None, revision_
     the in-process cache.  Backups/public sidecars remain intentionally deferred
     exactly as they were for cell patches.
     """
+    if str(key) == "schedule-data-v2":
+        value = _authorize_user_changes({str(key): value})[str(key)]
     os.makedirs(DATA_DIR, exist_ok=True)
     conn = _sqlite_connect()
     revision_map = {str(k): int(v) for k, v in (revision_map or {}).items() if str(k)}
@@ -2599,6 +2606,87 @@ APP_BUILD_ID = _compute_app_build_id()
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
 
 
+def _auth_project(store):
+    """Читает рабочий проект без изменения ссылок кеша хранилища."""
+    raw = store.get("schedule-data-v2")
+    return json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, dict) else {})
+
+
+def _auth_read_users():
+    """Выдаёт отдельную копию учётных записей для проверки и изменения пароля."""
+    return copy.deepcopy(_auth_project(load_store()).get("users") or [])
+
+
+def _auth_update_users(users):
+    """Пишет проверенное сервером изменение пользователей под общей блокировкой."""
+    store = load_store()
+    project = dict(_auth_project(store))
+    project["users"] = users
+    store["schedule-data-v2"] = project
+    g.auth_internal_write = True
+    try:
+        save_store(store, refresh_public=False, refresh_status=False)
+    finally:
+        g.auth_internal_write = False
+
+
+def _auth_current_users():
+    """Читает свежие credentials проекцией JSON, не передавая большой проект."""
+    if not _storage_exists():
+        return []
+    conn = _sqlite_connect()
+    try:
+        projection = "(value_json::jsonb -> 'users')::text" if USE_POSTGRES else "json_extract(value_json, '$.users')"
+        row = conn.execute(f"SELECT {projection} FROM kv_store WHERE key=?", ("schedule-data-v2",)).fetchone()
+        if row and row[0] is not None:
+            return json.loads(row[0]) or []
+        # Старый формат содержит JSON-строку внутри value_json, а не объект.
+        row = conn.execute("SELECT value_json FROM kv_store WHERE key=?", ("schedule-data-v2",)).fetchone()
+        project = json.loads(row[0]) if row else {}
+        project = json.loads(project) if isinstance(project, str) else project
+        return project.get("users") or []
+    finally:
+        conn.close()
+
+
+def _validate_user_edit(incoming, existing, baseline):
+    """Разрешает явное управление пользователями только актуальному superadmin."""
+    from werkzeug.exceptions import Conflict
+    if (getattr(g, "auth_user", None) or {}).get("role") != "superadmin":
+        raise Forbidden("Управление пользователями доступно только главному администратору")
+    if baseline != existing:
+        raise Conflict("Учётные записи изменились; обновите страницу")
+    if not isinstance(incoming, list) or not all(isinstance(u, dict) for u in incoming):
+        raise Forbidden("Неверный список пользователей")
+    if not any(u.get("role") == "superadmin" for u in incoming):
+        raise Forbidden("Нельзя удалить последнего главного администратора")
+
+
+def _authorize_user_changes(store):
+    """Сохраняет свежие пароли при запоздавшем autosave и проверяет смену ролей."""
+    if not has_request_context() or getattr(g, "auth_internal_write", False):
+        return store
+    existing = _auth_current_users()
+    baseline = getattr(g, "auth_users", existing)
+    project = _auth_project(store)
+    incoming = project.get("users") or []
+    if incoming != baseline:
+        try:
+            _validate_user_edit(incoming, existing, baseline)
+        except Exception:
+            _invalidate_store_cache()
+            raise
+    else:
+        project = dict(project)
+        project["users"] = existing
+        store["schedule-data-v2"] = project
+    return store
+
+
+install_auth(app, DATA_DIR, _auth_read_users, _auth_update_users, _lock)
+
+
+
 def _editor_compact_project(data):
     """Return editor payload without historical publication snapshots.
 
@@ -2745,6 +2833,17 @@ def _stale_schedule_client_response():
         "currentBuild": CURRENT_SCHEDULE_CLIENT_BUILD,
     }), 409
 
+def _decompress_storage_body(raw_bytes):
+    """Ограничивает распаковку отдельно от HTTP-тела, останавливая gzip bomb."""
+    limit = int(os.environ.get("MAX_STORAGE_BYTES", 128 * 1024 * 1024))
+    with gzip.GzipFile(fileobj=io.BytesIO(raw_bytes)) as source:
+        expanded = source.read(limit + 1)
+    if len(expanded) > limit:
+        from werkzeug.exceptions import RequestEntityTooLarge
+        raise RequestEntityTooLarge("Распакованные данные превышают допустимый размер")
+    return expanded
+
+
 @app.post("/api/storage/<key>")
 def set_key(key):
     allow_create = request.args.get("allow_create") == "1"
@@ -2753,7 +2852,7 @@ def set_key(key):
         raw_bytes = request.get_data(cache=False)
         if request.headers.get("Content-Encoding", "").lower() == "gzip" and raw_bytes[:2] == b"\x1f\x8b":
             try:
-                raw_bytes = gzip.decompress(raw_bytes)
+                raw_bytes = _decompress_storage_body(raw_bytes)
             except (OSError, EOFError) as exc:
                 return jsonify({"error": f"Не удалось распаковать данные сохранения: {exc}"}), 400
         try:
@@ -3594,6 +3693,8 @@ def schedule_generate_start():
     job_id = uuid.uuid4().hex
     with _generation_jobs_lock:
         queued = sum(1 for j in _generation_jobs.values() if j.get("status") in {"queued", "running"})
+        if queued >= 4:
+            return jsonify({"error": "Очередь генерации заполнена; повторите позже"}), 429
         _generation_jobs[job_id] = {
             "id": job_id, "kind": "schedule", "status": "queued", "phase": "queued", "created_at": time.time(),
             "queue_position": queued + 1, "storage_key": storage_key, "group_id": group_id, "protected_ids": set(),
@@ -3823,6 +3924,8 @@ def graph_auto_group_start():
     job_id = uuid.uuid4().hex
     with _generation_jobs_lock:
         queued = sum(1 for j in _generation_jobs.values() if j.get("status") in {"queued", "running"})
+        if queued >= 4:
+            return jsonify({"error": "Очередь генерации заполнена; повторите позже"}), 429
         _generation_jobs[job_id] = {
             "id": job_id, "kind": "graph", "status": "queued", "phase": "queued", "created_at": time.time(),
             "queue_position": queued + 1, "storage_key": storage_key, "group_id": group_id,
@@ -7786,20 +7889,8 @@ def storage_schedule_merge(key):
 
 
 def _request_admin_user():
-    """Resolve an admin/superadmin from the canonical store for sensitive recovery endpoints."""
-    user_id = str(request.headers.get("X-Admin-User-Id") or "").strip()
-    if not user_id:
-        return None
-    try:
-        store = load_store()
-        raw = store.get("schedule-data-v2")
-        data = json.loads(raw) if isinstance(raw, str) else (raw if isinstance(raw, dict) else {})
-        for user in (data.get("users") or []):
-            if str(user.get("id") or "") == user_id and str(user.get("role") or "") in {"admin", "superadmin"}:
-                return user
-    except Exception:
-        return None
-    return None
+    """Доверяет только личности, проверенной серверной подписанной сессией."""
+    return getattr(g, "auth_user", None)
 
 
 @app.post("/api/storage-backups/create")
@@ -7899,6 +7990,8 @@ def storage_backup_restore(name):
 @app.after_request
 def _performance_cache_headers(response):
     path = request.path or ""
+    if path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
     if path.startswith("/assets/"):
         response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
     elif path == "/" or path.startswith("/admin") or path.startswith("/group/") or path.startswith("/teacher/") or path.startswith("/specialty/"):

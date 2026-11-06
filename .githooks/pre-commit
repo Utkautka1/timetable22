@@ -1,0 +1,7 @@
+#!/bin/sh
+# Не пропускает регрессии контроля доступа и повторов запросов в новый коммит.
+set -eu
+python3 tools/check_auth_security.py
+node tools/check_storage_retry.mjs
+node tools/check_custom_weeks.mjs
+git diff --cached --check
