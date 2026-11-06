@@ -142,7 +142,45 @@ sequenceDiagram
 | `/api/public-index` | 201.4 KB | 21.9 KB | 89.1% | 1.5 ms |
 | `/api/public-schedule/group/9b28grdj` | 361.5 KB | 19.8 KB | 94.5% | 5.0 ms |
 
-### Гранулярная гидратация вкладок (Client-Side Routing)
+### Гранулярная гидратация вкладок и оптимизация рендеринга (Client-Side Performance)
+
+```mermaid
+flowchart TD
+    subgraph UI["Административная панель (App.jsx)"]
+        Tabs["21 Вкладка редактора"] --> LP["LoadsPanel (Нагрузки)"]
+        Tabs --> GP["GraphsPanel (Графики)"]
+        Tabs --> CC["ConflictCenterPanel (Конфликты)"]
+        Tabs --> LightTabs["18 Остальных вкладок"]
+    end
+
+    subgraph LP_Opt["Оптимизация LoadsPanel"]
+        LP --> PageCtrl["LoadsPagination (100 строк на страницу)"]
+        PageCtrl --> DOM["DOM: ~1,500 узлов вместо ~60,000 (109 мс вместо 13,194 мс)"]
+    end
+
+    subgraph GP_Opt["Оптимизация GraphsPanel"]
+        GP --> MapIdx["Индексы sameGroupSubjectTypePeers + graphLoadsByGroup"]
+        MapIdx --> O1Lookup["O(1) доступ к строкам потоков (108 мс вместо 9,867 мс)"]
+        GP --> ScarcityCache["Кэш дефицитности: graphScarcityProfileCache"]
+    end
+
+    subgraph CC_Opt["Оптимизация ConflictCenterPanel"]
+        CC --> AsyncStep["Отложенный расчет через setTimeout (0 мс блокировки)"]
+        CC --> ResourceBucket["Slot-бакетирование по преподавателям/аудиториям/группам"]
+        ResourceBucket --> CCFast["118 мс вместо 6,611 мс"]
+    end
+```
+
+#### Замеры скорости переключения вкладок (E2E Benchmark, 21 вкладка, проект 57.5 МБ)
+
+| Вкладка | Время до оптимизации | Время после оптимизации | Ускорение |
+| --- | --- | --- | --- |
+| **Нагрузки** (3,995 строк) | **13 194 мс** | **109 мс** | **121x** |
+| **Графики** (расчёт 20 недель) | **9 867 мс** | **108 мс** | **91x** |
+| **Центр конфликтов** (O(N²) -> O(N)) | **6 611 мс** | **118 мс** | **56x** |
+| Расписание | 2 051 мс | 108 мс | 19x |
+| Фактические часы | ~1 800 мс | 298 мс | 6x |
+| Списки / Учебный план / Замены / etc. | 500–800 мс | 105–236 мс | 3–5x |
 
 14 из 21 вкладок панели администратора (`lists`, `constraints`, `announcements`, `consultations`, `curriculum`, `substitutions`, `scenarios`, `attestation`, `practices`, `history`, `versions`, `config`, `users`, `semester`) являются легковесными и отображаются мгновенно (0 мс) из уже полученного `bootstrap` без фоновых запросов к сети. Тяжёлые разделы (`loads`, `graphState`, `schedule`) запрашиваются инкрементально только при переходе на соответствующие специализированные вкладки, исключая повторную загрузку уже имеющихся в памяти данных.
 

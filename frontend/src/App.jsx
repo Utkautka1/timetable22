@@ -7788,6 +7788,30 @@ function CurriculumPanel({ data, set }) {
   );
 }
 
+function LoadsPagination({ page, totalPages, totalCount, pageSize, setPage, setPageSize }) {
+  const start = Math.min((page - 1) * pageSize + 1, totalCount);
+  const end = Math.min(page * pageSize, totalCount);
+  return (
+    <div className="load-pagination" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", flexWrap: "wrap" }}>
+      <div style={{ fontSize: 13, color: "var(--text-muted, #64748b)" }}>
+        Показаны <b>{totalCount ? `${start}–${end}` : 0}</b> из <b>{totalCount}</b>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <button className="btn ghost sm" onClick={() => setPage(1)} disabled={page <= 1} title="Первая страница">«</button>
+        <button className="btn ghost sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1}>‹ Назад</button>
+        <span style={{ fontSize: 13 }}>Стр. <b>{page}</b> из <b>{totalPages}</b></span>
+        <button className="btn ghost sm" onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Вперёд ›</button>
+        <button className="btn ghost sm" onClick={() => setPage(totalPages)} disabled={page >= totalPages} title="Последняя страница">»</button>
+        <select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} style={{ width: "auto", fontSize: 13, padding: "2px 6px" }}>
+          <option value={50}>по 50</option>
+          <option value={100}>по 100</option>
+          <option value={200}>по 200</option>
+        </select>
+      </div>
+    </div>
+  );
+}
+
 function LoadsPanel({ data, set, openStreamLoadId = "", onStreamRequestHandled = null, onTransferRemainingLoads = null }) {
   const { loads, groups, teachers, subjects, lessonTypes, departments, specialties, config } = data;
   const setLoads = set("loads");
@@ -7843,6 +7867,12 @@ function LoadsPanel({ data, set, openStreamLoadId = "", onStreamRequestHandled =
   const [coScheduleModalLoadId, setCoScheduleModalLoadId] = useState(null);
   const [coSchedulePending, setCoSchedulePending] = useState([]);
   const fileRef = useRef(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(100);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterSpec, filterGroupIds, filterTeacherIds, filterCourses, sortLevels]);
 
   const groupOptions = groups.map((g) => ({ value: g.id, label: g.name }));
   const teacherOptions = teachers.map((t) => ({ value: t.id, label: t.name }));
@@ -8608,6 +8638,10 @@ function LoadsPanel({ data, set, openStreamLoadId = "", onStreamRequestHandled =
     return 0;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedLoads = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
+
   return (
     <div className="section">
       <header className="section-head">
@@ -8708,18 +8742,20 @@ function LoadsPanel({ data, set, openStreamLoadId = "", onStreamRequestHandled =
         <button className="btn primary sm" onClick={() => quickAddScope === "group" ? addRow(quickAddGroup) : quickAddScope === "teacher" ? addRow(null,quickAddTeacher,null) : quickAddScope === "subject" ? addRow(null,null,quickAddSubject) : addForSpecialty(quickAddSpec)} disabled={(quickAddScope === "specialty" && !quickAddSpec)||(quickAddScope==="teacher"&&!quickAddTeacher)||(quickAddScope==="subject"&&!quickAddSubject)}><Plus size={14} /> Назначить нагрузку</button>
       </div>
 
+      <LoadsPagination page={safePage} totalPages={totalPages} totalCount={filtered.length} pageSize={pageSize} setPage={setPage} setPageSize={setPageSize} />
+
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th style={{ width: 38, textAlign: "center" }}><input type="checkbox" title="Выбрать все отображаемые" checked={filtered.length > 0 && filtered.every((l) => selectedLoadIds.includes(l.id))} onChange={(e) => setSelectedLoadIds((cur) => e.target.checked ? [...new Set([...cur, ...filtered.map((l)=>l.id)])] : cur.filter((id) => !filtered.some((l)=>l.id===id)))} /></th>
+              <th style={{ width: 38, textAlign: "center" }}><input type="checkbox" title="Выбрать все на текущей странице" checked={pagedLoads.length > 0 && pagedLoads.every((l) => selectedLoadIds.includes(l.id))} onChange={(e) => setSelectedLoadIds((cur) => e.target.checked ? [...new Set([...cur, ...pagedLoads.map((l)=>l.id)])] : cur.filter((id) => !pagedLoads.some((l)=>l.id===id)))} /></th>
               <th>Группа</th><th>Подгруппа</th><th>Дисциплина</th><th>Преподаватель</th>
               <th>Вид занятия</th><th>Формат проведения</th><th>Совмещение занятий</th><th>Аудитория</th>
               <th>Спаривание</th><th>Одновременно с</th><th>Позиция</th><th className="col-actions" />
             </tr>
           </thead>
           <tbody>
-            {filtered.map((l) => (
+            {pagedLoads.map((l) => (
               <tr key={l.id} className={selectedLoadIds.includes(l.id) ? "row-selected" : ""}>
                 <td style={{ textAlign: "center" }}><input type="checkbox" checked={selectedLoadIds.includes(l.id)} onChange={(e) => setSelectedLoadIds((cur) => e.target.checked ? [...new Set([...cur, l.id])] : cur.filter((id) => id !== l.id))} /></td>
                 <td>
@@ -8961,6 +8997,8 @@ function LoadsPanel({ data, set, openStreamLoadId = "", onStreamRequestHandled =
         </table>
         <button className="btn ghost" onClick={() => addRow(quickAddGroup)}><Plus size={15} /> Добавить строку нагрузки</button>
       </div>
+
+      <LoadsPagination page={safePage} totalPages={totalPages} totalCount={filtered.length} pageSize={pageSize} setPage={setPage} setPageSize={setPageSize} />
 
       {transferLoadModalOpen && (() => {
         const requested = transferSeedIds.length;
@@ -9327,7 +9365,7 @@ function GraphCellNumberInput({ value, disabled = false, onCommit, onFocus, onBl
 function GraphsPanel({ data, set, onPersistNow, activeUsers = [], currentUser = null, onPresenceEditing = null }) {
   const { groups, subjects, teachers, lessonTypes, loads, config, curriculumPlan, specialties, rooms = [] } = data;
   const [viewMode, setViewMode] = useState("group");
-  const [targetId, setTargetId] = useState("");
+  const [targetId, setTargetId] = useState(() => (groups && groups[0] ? groups[0].id : ""));
   // v1832: отдельный режим мультифильтра для графиков.
   // Можно выбрать несколько групп и дополнительно сузить их одним преподавателем.
   const [graphFilterGroupIds, setGraphFilterGroupIds] = useState([]);
@@ -9612,6 +9650,7 @@ function GraphsPanel({ data, set, onPersistNow, activeUsers = [], currentUser = 
   const autoPairLimitRenderCache = new Map();
   const overloadInfoRenderCache = new Map();
   const remainingInfoRenderCache = new Map();
+  const graphScarcityProfileCache = new Map();
 
   // v1532: практика может занимать только часть недели. Такая неделя больше не
   // блокируется целиком: график остаётся редактируемым, но недельная вместимость
@@ -9926,22 +9965,19 @@ function GraphsPanel({ data, set, onPersistNow, activeUsers = [], currentUser = 
     if (!row || !gid) return false;
     if (String(row.groupId || '') === String(gid)) return true;
     if (!(row.streamGroupIds || []).map(String).includes(String(gid))) return false;
-
-    // Если у участника потока есть собственная строка нагрузки, именно она
-    // является источником его часов. Чужую строку потока не считаем второй раз.
-    const ownParticipant = loads.some((peer) =>
+    const key = [String(gid), String(row.subjectId || ""), String(row.typeId || "")].join("|");
+    const peers = sameGroupSubjectTypePeers.get(key) || [];
+    return !peers.some((peer) =>
       peer && String(peer.id || '') !== String(row.id || '') &&
-      String(peer.groupId || '') === String(gid) &&
-      peer.subjectId === row.subjectId && peer.typeId === row.typeId &&
       sameHourBucket(peer, row) && sameLogicalHourStream(peer, row)
     );
-    return !ownParticipant;
   };
 
   const canonicalHourRowsForGroup = (gid, sample) => {
     const seenStreams = new Set();
     const seenLegacy = new Set();
-    return loads.filter((x) =>
+    const groupRows = graphLoadsByGroup.get(String(gid)) || [];
+    return groupRows.filter((x) =>
       countsTowardGroupHours(x, gid) &&
       x.subjectId === sample.subjectId && x.typeId === sample.typeId && sameHourBucket(x, sample)
     ).filter((x) => {
@@ -9996,9 +10032,9 @@ function GraphsPanel({ data, set, onPersistNow, activeUsers = [], currentUser = 
   // 13 парах показывалось ложное +26 ак.ч.
   const hourOwnerRowForGroup = (gid, load) => {
     if (String(load?.groupId || "") === String(gid)) return load;
-    const own = (loads || []).find((peer) =>
-      peer && String(peer.groupId || "") === String(gid) &&
-      peer.subjectId === load.subjectId && peer.typeId === load.typeId &&
+    const key = [String(gid), String(load.subjectId || ""), String(load.typeId || "")].join("|");
+    const peers = sameGroupSubjectTypePeers.get(key) || [];
+    const own = peers.find((peer) =>
       sameHourBucket(peer, load) && sameLogicalHourStream(peer, load)
     );
     return own || load;
@@ -10300,24 +10336,32 @@ function GraphsPanel({ data, set, onPersistNow, activeUsers = [], currentUser = 
     return { available, total, ratio: total ? available / total : 0, vacancy: false };
   };
 
-  const graphScarcityProfile = (l, excludedLoadIds = new Set()) => {
+  const computeScarcityProfile = (l, excludedLoadIds) => {
     const roomOptions = graphRoomOptionCount(l);
     const teacherPattern = graphTeacherAvailabilityProfile(l);
     let estimatedSlots = 0;
     let feasibleWeeks = 0;
-    for (let w=1; w<=totalWeeks; w++) {
-      if (practiceBlocksLoadWeek(l,w)) continue;
-      const gc = groupWeekCapacity(graphTargetId,w);
-      const weight = groupLoadPairWeight(l,graphTargetId);
+    for (let w = 1; w <= totalWeeks; w++) {
+      if (practiceBlocksLoadWeek(l, w)) continue;
+      const gc = groupWeekCapacity(graphTargetId, w);
+      const weight = groupLoadPairWeight(l, graphTargetId);
       const groupSlots = weight > 0 ? Math.floor(gc.capacityPairs / weight) : 0;
-      const rawTeacher = teacherRawSlotCapacity(l,w);
-      const reservedOther = teacherReservedPairs(l.teacherId,w,excludedLoadIds);
-      const teacherFree = Number.isFinite(rawTeacher) ? Math.max(0, rawTeacher-reservedOther) : groupSlots;
+      const rawTeacher = teacherRawSlotCapacity(l, w);
+      const reservedOther = teacherReservedPairs(l.teacherId, w, excludedLoadIds);
+      const teacherFree = Number.isFinite(rawTeacher) ? Math.max(0, rawTeacher - reservedOther) : groupSlots;
       const possible = Math.max(0, Math.min(groupSlots, teacherFree));
       if (possible > 0 && roomOptions > 0) { feasibleWeeks++; estimatedSlots += possible; }
     }
     const demand = Math.max(0, Number(autoPairLimit(l)) || 0);
     return { ...teacherPattern, roomOptions, estimatedSlots, feasibleWeeks, demand };
+  };
+
+  const graphScarcityProfile = (l, excludedLoadIds = new Set()) => {
+    const key = `${String(l?.id || "")}:${excludedLoadIds.size}:${graphTargetId}`;
+    if (graphScarcityProfileCache.has(key)) return graphScarcityProfileCache.get(key);
+    const value = computeScarcityProfile(l, excludedLoadIds);
+    graphScarcityProfileCache.set(key, value);
+    return value;
   };
 
   const graphScarcityLevel = (l) => {
@@ -24375,46 +24419,119 @@ function curriculumProgressRows(data) {
   return rows;
 }
 
-function ConflictCenterPanel({data,set,onAutoGenerate}){
-  const by=(arr,id)=>arr.find((x)=>x.id===id);
-  const conflicts=[];
-  const occ=scheduleOccurrences(data);
-  for(const o of occ){
-    if(isNoClassDate(data,o.date)) conflicts.push({kind:"calendar",severity:"critical",date:o.date,loadId:o.inst.loadId,text:`${by(data.groups,o.inst.groupId)?.name||"Группа"}: ${by(data.subjects,o.inst.subjectId)?.name||"Занятие"} попадает на день без обычных занятий`});
-    if(o.inst.format!=="remote"){
-      const roomNames=assignmentRoomLabel(data,o.a); const subj=by(data.subjects,o.inst.subjectId);
-      const selectedRooms=assignmentRoomIds(o.a).map(id=>by(data.rooms,id)).filter(Boolean);
-      const bad=selectedRooms.map(r=>roomMeetsSubject(r,subj,0)).find(x=>!x.ok);
-      const totalCap=selectedRooms.reduce((sum,r)=>sum+(Number(r.capacity)||0),0);
-      const capBad=o.inst.requiredCapacity&&totalCap&&totalCap<o.inst.requiredCapacity?`не хватает мест: нужно ${o.inst.requiredCapacity}, суммарно ${totalCap}`:"";
-      if(bad||capBad) conflicts.push({kind:"room",severity:"critical",date:o.date,text:`${by(data.groups,o.inst.groupId)?.name||""} · ${subj?.name||""}: ${capBad||bad.reason}`});
+function findCalendarAndRoomConflicts(data, occ, groupMap, subjectMap, roomMap) {
+  const conflicts = [];
+  for (const o of occ) {
+    if (isNoClassDate(data, o.date)) {
+      const gName = groupMap.get(o.inst.groupId)?.name || "Группа";
+      const sName = subjectMap.get(o.inst.subjectId)?.name || "Занятие";
+      conflicts.push({ kind: "calendar", severity: "critical", date: o.date, loadId: o.inst.loadId, text: `${gName}: ${sName} попадает на день без обычных занятий` });
+    }
+    if (o.inst.format !== "remote") {
+      const subj = subjectMap.get(o.inst.subjectId);
+      const selectedRooms = assignmentRoomIds(o.a).map((id) => roomMap.get(id)).filter(Boolean);
+      const bad = selectedRooms.map((r) => roomMeetsSubject(r, subj, 0)).find((x) => !x.ok);
+      const totalCap = selectedRooms.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0);
+      const capBad = o.inst.requiredCapacity && totalCap && totalCap < o.inst.requiredCapacity ? `не хватает мест: нужно ${o.inst.requiredCapacity}, суммарно ${totalCap}` : "";
+      if (bad || capBad) {
+        const gName = groupMap.get(o.inst.groupId)?.name || "";
+        const sName = subj?.name || "";
+        conflicts.push({ kind: "room", severity: "critical", date: o.date, text: `${gName} · ${sName}: ${capBad || bad.reason}` });
+      }
     }
   }
-  // Фактическая двойная занятость по конкретной дате.
-  // ВАЖНО: п/г 1 и п/г 2 одной группы могут идти параллельно и конфликтом не являются.
-  // Старая диагностика складывала занятость в грубые gp:<group>:<subgroup> ключи и
-  // поэтому могла принять старый синтетический subgroup=0 из потокового instance за «всю группу».
-  // Здесь используем те же авторитетные loadId -> subgroup правила, что и основное расписание.
-  const occurrenceLabel = (o) => {
-    const group = by(data.groups, o.inst.groupId)?.name || "Группа";
-    const subject = by(data.subjects, o.inst.subjectId)?.name || "Занятие";
-    const teacher = by(data.teachers, o.teacherId)?.name || by(data.teachers, o.inst.teacherId)?.name || "";
-    const sg = Number(o.inst.subgroup) || 0;
-    return `${group}${sg ? ` · п/г ${sg}` : " · вся группа"} · ${subject}${teacher ? ` · ${teacher}` : ""}`;
-  };
-  const sameHalfDoesNotOverlap = (A, B) => {
-    const ah=A.a?.half ?? null, bh=B.a?.half ?? null;
-    return ah != null && bh != null && Number(ah)!==Number(bh);
-  };
-  const allowedMidPairEventOccurrence = (A, B) => {
-    const aEvent=!!A?.inst?.isScheduleEvent, bEvent=!!B?.inst?.isScheduleEvent;
-    if (aEvent === bEvent) return false;
-    const eventOcc = aEvent ? A : B;
-    const lessonOcc = aEvent ? B : A;
-    const period = Number(lessonOcc?.a?.period ?? eventOcc?.a?.period);
-    const day = Number(lessonOcc?.a?.day ?? eventOcc?.a?.day);
-    return eventStartsInsideAcademicPeriod(data.config, eventOcc.inst, period, data, lessonOcc.inst, day);
-  };
+  return conflicts;
+}
+
+function occurrenceDisplayLabel(data, o, groupMap, subjectMap, teacherMap) {
+  const group = groupMap.get(o.inst.groupId)?.name || "Группа";
+  const subject = subjectMap.get(o.inst.subjectId)?.name || "Занятие";
+  const teacher = teacherMap.get(o.teacherId)?.name || teacherMap.get(o.inst.teacherId)?.name || "";
+  const sg = Number(o.inst.subgroup) || 0;
+  return `${group}${sg ? ` · п/г ${sg}` : " · вся группа"} · ${subject}${teacher ? ` · ${teacher}` : ""}`;
+}
+
+function isAllowedMidPairEvent(data, A, B) {
+  const aEvent = !!A?.inst?.isScheduleEvent, bEvent = !!B?.inst?.isScheduleEvent;
+  if (aEvent === bEvent) return false;
+  const eventOcc = aEvent ? A : B, lessonOcc = aEvent ? B : A;
+  const period = Number(lessonOcc?.a?.period ?? eventOcc?.a?.period);
+  const day = Number(lessonOcc?.a?.day ?? eventOcc?.a?.day);
+  return eventStartsInsideAcademicPeriod(data.config, eventOcc.inst, period, data, lessonOcc.inst, day);
+}
+
+function checkGroupOverlap(data, A, B, gid, slotKey, doubleSeen, labelA, labelB, groupMap) {
+  if (!normalizedParticipantSubgroupsOverlap(data, A.inst, B.inst, gid)) return null;
+  const pairIds = [String(A.inst.instId || ""), String(B.inst.instId || "")].sort().join("|");
+  const key = `${slotKey}|group|${gid}|${pairIds}`;
+  if (doubleSeen.has(key)) return null;
+  doubleSeen.add(key);
+  const subsA = normalizedParticipantSubgroups(data, A.inst, gid);
+  const subsB = normalizedParticipantSubgroups(data, B.inst, gid);
+  const groupName = groupMap.get(gid)?.name || "Группа";
+  const subLabel = (xs) => xs.includes(0) ? "вся группа" : xs.map((x) => `п/г ${x}`).join(", ");
+  return { kind: "double", severity: "critical", date: A.date, text: `${groupName}: реальное наложение на ${A.a.period + 1}-й паре — ${subLabel(subsA)} пересекается с ${subLabel(subsB)}. ${labelA} ↔ ${labelB}` };
+}
+
+function checkTeacherOverlap(data, A, B, slotKey, doubleSeen, labelA, labelB, teacherMap) {
+  if (!A.teacherId || !B.teacherId || A.teacherId !== B.teacherId || A.inst.isVacancyTeacher || B.inst.isVacancyTeacher) return null;
+  if (sameTeacherSiblingSubgroupsCompatible(A.inst, B.inst) || A.a?.manualPotentialStream || B.a?.manualPotentialStream || A.a?.manualTeacherMultiRoom || B.a?.manualTeacherMultiRoom || A.a?.manualMultiGroupRoom || B.a?.manualMultiGroupRoom) return null;
+  const pairIds = [String(A.inst.instId || ""), String(B.inst.instId || "")].sort().join("|");
+  const key = `${slotKey}|teacher|${A.teacherId}|${pairIds}`;
+  if (doubleSeen.has(key)) return null;
+  doubleSeen.add(key);
+  const teacherName = teacherMap.get(A.teacherId)?.name || "Преподаватель";
+  return { kind: "double", severity: "critical", date: A.date, text: `${teacherName}: одновременно два разных занятия на ${A.a.period + 1}-й паре. ${labelA} ↔ ${labelB}` };
+}
+
+function checkRoomOverlap(data, A, B, slotKey, doubleSeen, labelA, labelB, roomMap) {
+  if (A.inst.format === "remote" || B.inst.format === "remote" || sameTeacherSiblingSubgroupsCompatible(A.inst, B.inst) || A.a?.manualPotentialStream || B.a?.manualPotentialStream || A.a?.manualMultiGroupRoom || B.a?.manualMultiGroupRoom) return [];
+  const pairIds = [String(A.inst.instId || ""), String(B.inst.instId || "")].sort().join("|");
+  const roomsA = new Set(assignmentRoomIds(A.a));
+  const conflicts = [];
+  for (const rid of assignmentRoomIds(B.a)) {
+    if (!roomsA.has(rid)) continue;
+    const key = `${slotKey}|room|${rid}|${pairIds}`;
+    if (doubleSeen.has(key)) continue;
+    doubleSeen.add(key);
+    const roomName = roomMap.get(rid)?.name || "Аудитория";
+    conflicts.push({ kind: "double", severity: "critical", date: A.date, text: `Аудитория ${roomName}: одновременно назначены два разных занятия на ${A.a.period + 1}-й паре. ${labelA} ↔ ${labelB}` });
+  }
+  return conflicts;
+}
+
+function findSlotDoubleBookings(data, rows, slotKey, doubleSeen, { groupMap, subjectMap, teacherMap, roomMap }) {
+  const conflicts = [];
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = i + 1; j < rows.length; j++) {
+      const A = rows[i], B = rows[j];
+      if (A.inst.instId === B.inst.instId) continue;
+      if (A.a?.half != null && B.a?.half != null && Number(A.a.half) !== Number(B.a.half)) continue;
+      if (isAllowedMidPairEvent(data, A, B)) continue;
+      const labelA = occurrenceDisplayLabel(data, A, groupMap, subjectMap, teacherMap);
+      const labelB = occurrenceDisplayLabel(data, B, groupMap, subjectMap, teacherMap);
+      for (const gid of streamGroups(A.inst)) {
+        if (streamGroups(B.inst).includes(gid)) {
+          const c = checkGroupOverlap(data, A, B, gid, slotKey, doubleSeen, labelA, labelB, groupMap);
+          if (c) conflicts.push(c);
+        }
+      }
+      const tc = checkTeacherOverlap(data, A, B, slotKey, doubleSeen, labelA, labelB, teacherMap);
+      if (tc) conflicts.push(tc);
+      conflicts.push(...checkRoomOverlap(data, A, B, slotKey, doubleSeen, labelA, labelB, roomMap));
+    }
+  }
+  return conflicts;
+}
+
+function computeScheduleConflicts(data) {
+  const groupMap = new Map((data.groups || []).map((x) => [x.id, x]));
+  const subjectMap = new Map((data.subjects || []).map((x) => [x.id, x]));
+  const teacherMap = new Map((data.teachers || []).map((x) => [x.id, x]));
+  const roomMap = new Map((data.rooms || []).map((x) => [x.id, x]));
+  const maps = { groupMap, subjectMap, teacherMap, roomMap };
+  const occ = scheduleOccurrences(data);
+  const conflicts = findCalendarAndRoomConflicts(data, occ, groupMap, subjectMap, roomMap);
   const byDateSlot = new Map();
   for (const o of occ) {
     const key = `${o.date}|${Number(o.a.period)}`;
@@ -24422,72 +24539,84 @@ function ConflictCenterPanel({data,set,onAutoGenerate}){
   }
   const doubleSeen = new Set();
   for (const [slotKey, rows] of byDateSlot.entries()) {
-    for (let i=0;i<rows.length;i++) for (let j=i+1;j<rows.length;j++) {
-      const A=rows[i], B=rows[j];
-      if (A.inst.instId === B.inst.instId || sameHalfDoesNotOverlap(A,B)) continue;
-      if (allowedMidPairEventOccurrence(A,B)) continue;
-      const pairIds=[String(A.inst.instId||""),String(B.inst.instId||"")].sort().join("|");
-      const commonGroups = streamGroups(A.inst).filter((gid)=>streamGroups(B.inst).includes(gid));
-      for (const gid of commonGroups) {
-        if (!normalizedParticipantSubgroupsOverlap(data, A.inst, B.inst, gid)) continue;
-        const subsA=normalizedParticipantSubgroups(data,A.inst,gid), subsB=normalizedParticipantSubgroups(data,B.inst,gid);
-        const groupName=by(data.groups,gid)?.name||"Группа";
-        const subLabel=(xs)=>xs.includes(0)?"вся группа":xs.map((x)=>`п/г ${x}`).join(", ");
-        const key=`${slotKey}|group|${gid}|${pairIds}`;
-        if (!doubleSeen.has(key)) {
-          doubleSeen.add(key);
-          conflicts.push({kind:"double",severity:"critical",date:A.date,text:`${groupName}: реальное наложение на ${A.a.period+1}-й паре — ${subLabel(subsA)} пересекается с ${subLabel(subsB)}. ${occurrenceLabel(A)} ↔ ${occurrenceLabel(B)}`});
-        }
-      }
-      if (A.teacherId && B.teacherId && A.teacherId===B.teacherId && !A.inst.isVacancyTeacher && !B.inst.isVacancyTeacher && !sameTeacherSiblingSubgroupsCompatible(A.inst, B.inst) && !A.a?.manualPotentialStream && !B.a?.manualPotentialStream && !A.a?.manualTeacherMultiRoom && !B.a?.manualTeacherMultiRoom && !A.a?.manualMultiGroupRoom && !B.a?.manualMultiGroupRoom) {
-        const key=`${slotKey}|teacher|${A.teacherId}|${pairIds}`;
-        if (!doubleSeen.has(key)) {
-          doubleSeen.add(key);
-          const teacherName=by(data.teachers,A.teacherId)?.name||"Преподаватель";
-          conflicts.push({kind:"double",severity:"critical",date:A.date,text:`${teacherName}: одновременно два разных занятия на ${A.a.period+1}-й паре. ${occurrenceLabel(A)} ↔ ${occurrenceLabel(B)}`});
-        }
-      }
-      if (A.inst.format!=="remote" && B.inst.format!=="remote" && !sameTeacherSiblingSubgroupsCompatible(A.inst, B.inst) && !A.a?.manualPotentialStream && !B.a?.manualPotentialStream && !A.a?.manualMultiGroupRoom && !B.a?.manualMultiGroupRoom) {
-        const roomsA=new Set(assignmentRoomIds(A.a));
-        for (const rid of assignmentRoomIds(B.a)) if (roomsA.has(rid)) {
-          const key=`${slotKey}|room|${rid}|${pairIds}`;
-          if (doubleSeen.has(key)) continue;
-          doubleSeen.add(key);
-          const roomName=by(data.rooms,rid)?.name||"Аудитория";
-          conflicts.push({kind:"double",severity:"critical",date:A.date,text:`Аудитория ${roomName}: одновременно назначены два разных занятия на ${A.a.period+1}-й паре. ${occurrenceLabel(A)} ↔ ${occurrenceLabel(B)}`});
-        }
-      }
-    }
+    conflicts.push(...findSlotDoubleBookings(data, rows, slotKey, doubleSeen, maps));
   }
-  for(const r of curriculumProgressRows(data)){
-    if(r.delta<0) conflicts.push({kind:"hours",severity:"warning",groupId:r.group.id,planId:r.plan.id,text:`${r.group.name} · ${by(data.subjects,r.plan.subjectId)?.name||""}: не хватает ${Math.abs(r.delta)} ч.`});
-    if(r.delta>0) conflicts.push({kind:"hours",severity:"warning",groupId:r.group.id,planId:r.plan.id,text:`${r.group.name} · ${by(data.subjects,r.plan.subjectId)?.name||""}: превышение на ${r.delta} ч.`});
+  for (const r of curriculumProgressRows(data)) {
+    if (r.delta < 0) conflicts.push({ kind: "hours", severity: "warning", groupId: r.group.id, planId: r.plan.id, text: `${r.group.name} · ${subjectMap.get(r.plan.subjectId)?.name || ""}: не хватает ${Math.abs(r.delta)} ч.` });
+    if (r.delta > 0) conflicts.push({ kind: "hours", severity: "warning", groupId: r.group.id, planId: r.plan.id, text: `${r.group.name} · ${subjectMap.get(r.plan.subjectId)?.name || ""}: превышение на ${r.delta} ч.` });
   }
-  const dedup=[...new Map(conflicts.map((x)=>[`${x.kind}|${x.date||""}|${x.text}`,x])).values()];
-  const critical=dedup.filter((x)=>x.severity==="critical").length;
-  const autoFix=()=>{
-    let loads=(data.loads||[]).map((l)=>({...l,weeklyPairs:{...(l.weeklyPairs||{})}}));
-    // Компенсируем занятия, выпавшие на календарные исключения, на ближайшей следующей разрешённой неделе.
-    const calendarLost=dedup.filter((x)=>x.kind==="calendar"&&x.loadId);
-    for(const c of calendarLost){
-      const l=loads.find((x)=>x.id===c.loadId); if(!l) continue;
-      const lostWeek=weekNumberOf(data.config.semesterStart,c.date)||1;
-      let target=null;
-      for(let w=lostWeek+1;w<=totalSemesterWeeks(data.config);w++){
-        const mon=addDays(mondayOf(data.config.semesterStart),(w-1)*7);
-        const usable=Array.from({length:7},(_,d)=>addDays(mon,d)).some((d)=>d>=data.config.semesterStart&&d<=data.config.semesterEnd&&!isNoClassDate(data,d));
-        if(usable){target=w;break;}
-      }
-      if(target) l.weeklyPairs[target]=(Number(l.weeklyPairs[target])||0)+1;
+  return [...new Map(conflicts.map((x) => [`${x.kind}|${x.date || ""}|${x.text}`, x])).values()];
+}
+
+function applyConflictAutoFix(data, set, conflicts) {
+  let loads = (data.loads || []).map((l) => ({ ...l, weeklyPairs: { ...(l.weeklyPairs || {}) } }));
+  const calendarLost = conflicts.filter((x) => x.kind === "calendar" && x.loadId);
+  for (const c of calendarLost) {
+    const l = loads.find((x) => x.id === c.loadId);
+    if (!l) continue;
+    const lostWeek = weekNumberOf(data.config.semesterStart, c.date) || 1;
+    let target = null;
+    for (let w = lostWeek + 1; w <= totalSemesterWeeks(data.config); w++) {
+      const mon = addDays(mondayOf(data.config.semesterStart), (w - 1) * 7);
+      const usable = Array.from({ length: 7 }, (_, d) => addDays(mon, d)).some((d) => d >= data.config.semesterStart && d <= data.config.semesterEnd && !isNoClassDate(data, d));
+      if (usable) { target = w; break; }
     }
-    set("loads")(loads);
-    const nextData={...data,loads};
-    set("schedule")(generateSchedule(nextData,data.schedule));
-  };
-  return <div className="section"><header className="section-head"><h1>Центр конфликтов</h1><p>Единая диагностика расписания: двойная занятость, неподходящие аудитории, календарные исключения и расхождения с учебным планом.</p></header>
-    <div className="stats-row"><div className="stat warn"><div className="stat-value">{critical}</div><div className="stat-label">Критических</div></div><div className="stat"><div className="stat-value">{dedup.length-critical}</div><div className="stat-label">Предупреждений</div></div><button className="btn primary" onClick={autoFix}><Wand2 size={15}/> Исправить автоматически</button><button className="btn ghost" onClick={onAutoGenerate}>Пересчитать расписание</button></div>
-    <div className="table-wrap"><table><thead><tr><th>Уровень</th><th>Дата</th><th>Категория</th><th>Проблема</th></tr></thead><tbody>{dedup.map((c,i)=><tr key={i}><td>{c.severity==="critical"?"🔴 критично":"🟡 предупреждение"}</td><td>{c.date?formatDateDM(c.date):"—"}</td><td>{c.kind==="calendar"?"Календарь":c.kind==="room"?"Аудитория":c.kind==="double"?"Занятость":"Часы"}</td><td>{c.text}</td></tr>)}{!dedup.length&&<tr><td colSpan={4} className="empty-row">Конфликтов не найдено</td></tr>}</tbody></table></div>
-  </div>;
+    if (target) l.weeklyPairs[target] = (Number(l.weeklyPairs[target]) || 0) + 1;
+  }
+  set("loads")(loads);
+  set("schedule")(generateSchedule({ ...data, loads }, data.schedule));
+}
+
+function ConflictCenterPanel({ data, set, onAutoGenerate }) {
+  const [analyzing, setAnalyzing] = useState(true);
+  const [conflicts, setConflicts] = useState([]);
+
+  useEffect(() => {
+    setAnalyzing(true);
+    const timer = setTimeout(() => {
+      setConflicts(computeScheduleConflicts(data));
+      setAnalyzing(false);
+    }, 10);
+    return () => clearTimeout(timer);
+  }, [data.schedule, data.loads, data.config, data.curriculumPlan]);
+
+  const critical = conflicts.filter((x) => x.severity === "critical").length;
+  const autoFix = () => applyConflictAutoFix(data, set, conflicts);
+
+  return (
+    <div className="section">
+      <header className="section-head">
+        <h1>Центр конфликтов</h1>
+        <p>Единая диагностика расписания: двойная занятость, неподходящие аудитории, календарные исключения и расхождения с учебным планом.</p>
+      </header>
+      <div className="stats-row">
+        <div className="stat warn"><div className="stat-value">{analyzing ? "…" : critical}</div><div className="stat-label">Критических</div></div>
+        <div className="stat"><div className="stat-value">{analyzing ? "…" : conflicts.length - critical}</div><div className="stat-label">Предупреждений</div></div>
+        <button className="btn primary" onClick={autoFix} disabled={analyzing}><Wand2 size={15}/> Исправить автоматически</button>
+        <button className="btn ghost" onClick={onAutoGenerate} disabled={analyzing}>Пересчитать расписание</button>
+      </div>
+      {analyzing ? (
+        <div className="notice" style={{ padding: "16px 20px" }}>⏳ Анализ конфликтов расписания…</div>
+      ) : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Уровень</th><th>Дата</th><th>Категория</th><th>Проблема</th></tr></thead>
+            <tbody>
+              {conflicts.map((c, i) => (
+                <tr key={i}>
+                  <td>{c.severity === "critical" ? "🔴 критично" : "🟡 предупреждение"}</td>
+                  <td>{c.date ? formatDateDM(c.date) : "—"}</td>
+                  <td>{c.kind === "calendar" ? "Календарь" : c.kind === "room" ? "Аудитория" : c.kind === "double" ? "Занятость" : "Часы"}</td>
+                  <td>{c.text}</td>
+                </tr>
+              ))}
+              {!conflicts.length && <tr><td colSpan={4} className="empty-row">Конфликтов не найдено</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function SubstitutionScenariosPanel({data,set}){
