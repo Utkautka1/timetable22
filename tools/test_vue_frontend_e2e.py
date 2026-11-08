@@ -109,5 +109,57 @@ class TestVueFrontendE2E(unittest.TestCase):
             self.assertEqual(res.status_code, 200)
             self.assertIn('<div id="app"></div>', res.data.decode("utf-8"))
 
+    def test_09_teacher_schedule_has_group_ids_and_resolvers(self):
+        """Проверяет, что расписание преподавателя содержит идентификаторы групп для карточки."""
+        res_idx = self.client.get("/api/public-index")
+        idx_data = json.loads(res_idx.data).get("data", {})
+        teachers = idx_data.get("teachers", [])
+        self.assertGreater(len(teachers), 0)
+        
+        # Находим преподавателя с расписанием
+        teacher_id = teachers[0]["id"]
+        res_sched = self.client.get(f"/api/public-schedule/teacher/{teacher_id}?week=10")
+        self.assertEqual(res_sched.status_code, 200)
+        sched_data = json.loads(res_sched.data)
+        instances = sched_data.get("schedule", {}).get("instances", [])
+        if instances:
+            first_inst = instances[0]
+            has_group = bool(first_inst.get("groupId") or first_inst.get("streamGroupIds"))
+            self.assertTrue(has_group, "У инстанса преподавателя должен присутствовать groupId или streamGroupIds")
+
+    def test_10_footer_official_college_name_no_tourism(self):
+        """Проверяет, что в собранном бандле указан верный колледж КТМУ и нет опечатки про туризм."""
+        bundle_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static", "assets"))
+        found_college = False
+        found_wrong_tourism = False
+        for fname in os.listdir(bundle_dir):
+            if fname.endswith(".js"):
+                fpath = os.path.join(bundle_dir, fname)
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+                    if "Колледж технологии, моделирования и управления" in content:
+                        found_college = True
+                    if "туризма и медиатехнологий" in content:
+                        found_wrong_tourism = True
+        self.assertTrue(found_college, "Официальное наименование КТМУ должно быть в JS-бандле")
+        self.assertFalse(found_wrong_tourism, "Ошибочного 'туризма и медиатехнологий' не должно быть в бандле")
+
+    def test_11_navbar_and_lesson_card_contract(self):
+        """Проверяет контракт связки Navbar (update:role, select-role) и LessonCard (effectiveGroups)."""
+        app_vue_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "App.vue"))
+        with open(app_vue_path, "r", encoding="utf-8") as f:
+            app_code = f.read()
+            self.assertIn("@select-role=", app_code)
+            self.assertIn("@update:role=", app_code)
+            self.assertIn(":getGroupName=\"getGroupName\"", app_code)
+            self.assertIn("@select-group=", app_code)
+
+        card_vue_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "components", "public", "LessonCard.vue"))
+        with open(card_vue_path, "r", encoding="utf-8") as f:
+            card_code = f.read()
+            self.assertIn("effectiveGroups", card_code)
+            self.assertIn("group-tag-btn", card_code)
+            self.assertIn("role === 'teacher'", card_code)
+
 if __name__ == "__main__":
     unittest.main()
