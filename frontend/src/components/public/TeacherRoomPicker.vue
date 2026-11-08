@@ -1,5 +1,9 @@
 <template>
   <div class="entity-picker-wrap">
+    <!-- Фоновый центральный оранжевый круг-градиент -->
+    <div class="ambient-orange-orb" aria-hidden="true"></div>
+    <div class="ambient-orange-glow" aria-hidden="true"></div>
+
     <!-- Выбор преподавателя -->
     <template v-if="role === 'teacher'">
       <div class="picker-header">
@@ -127,12 +131,58 @@ const campusGroups = computed(() => {
 
 <style scoped>
 .entity-picker-wrap {
+  position: relative;
   width: 100%;
-  max-width: 1200px;
+  max-width: 1240px;
   margin: 0 auto;
+  min-height: 60vh;
+}
+
+.ambient-orange-orb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(640px, 88vw);
+  height: min(640px, 88vw);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    #f97316 0%,
+    #ea580c 38%,
+    rgba(234, 88, 12, 0.45) 58%,
+    rgba(249, 115, 22, 0.15) 74%,
+    transparent 85%
+  );
+  filter: blur(52px);
+  opacity: 0.52;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ambient-orange-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(940px, 98vw);
+  height: min(940px, 98vw);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(251, 146, 60, 0.35) 0%,
+    rgba(254, 215, 170, 0.16) 45%,
+    transparent 75%
+  );
+  filter: blur(80px);
+  opacity: 0.6;
+  pointer-events: none;
+  z-index: 0;
 }
 
 .picker-header {
+  position: relative;
+  z-index: 2;
   margin-bottom: 20px;
 }
 
@@ -149,6 +199,8 @@ const campusGroups = computed(() => {
 }
 
 .alphabet-bar {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -160,7 +212,9 @@ const campusGroups = computed(() => {
   height: 32px;
   border: 1px solid var(--border-light);
   border-radius: 8px;
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   font-weight: 700;
   font-size: 13px;
   color: var(--ink-secondary);
@@ -181,27 +235,33 @@ const campusGroups = computed(() => {
 }
 
 .teachers-grid {
+  position: relative;
+  z-index: 2;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
 }
 
 .teacher-card {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 14px 16px;
-  background: #ffffff;
-  border: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 12px;
   cursor: pointer;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
   transition: all 0.2s ease;
 }
 
 .teacher-card:hover {
-  border-color: var(--blue-500);
-  box-shadow: 0 8px 18px -4px rgba(2, 132, 199, 0.14);
+  border-color: #f97316;
+  box-shadow: 0 8px 22px -4px rgba(234, 88, 12, 0.22);
   transform: translateY(-2px);
 }
 
@@ -216,17 +276,23 @@ const campusGroups = computed(() => {
 }
 
 .campuses-list {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
 .campus-block {
-  background: #ffffff;
-  border: 1px solid var(--border-light);
+  position: relative;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 16px;
   padding: 20px;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
 }
 
 .campus-header {

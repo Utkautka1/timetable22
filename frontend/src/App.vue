@@ -37,9 +37,6 @@
 
     <!-- Публичный портал -->
     <template v-else>
-      <!-- 3D Заголовок сцены с центральным оранжевым градиентным шаром -->
-      <HeroScene3D />
-
       <main class="main-content">
         <!-- Режим 1: Просмотр сетки пар (когда сущность выбрана) -->
         <template v-if="selectedId">
@@ -292,6 +289,11 @@ onUnmounted(() => {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  background-color: #f8fafc;
+  background-image: 
+    radial-gradient(circle at 50% 45%, rgba(249, 115, 22, 0.22) 0%, rgba(251, 146, 60, 0.12) 30%, rgba(254, 215, 170, 0.04) 55%, transparent 72%),
+    radial-gradient(circle at 88% 12%, rgba(2, 132, 199, 0.08) 0%, transparent 45%);
+  background-attachment: fixed;
 }
 
 .global-error-banner {
