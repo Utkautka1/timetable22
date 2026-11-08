@@ -52,7 +52,11 @@ export function storageFetch(url, options = {}) {
   if (method === 'GET' && /^\/api\/storage\//.test(url)) {
     url += `${url.includes('?') ? '&' : '?'}editor=1`;
   }
-  return fetch(url, { ...options, headers: editorRequestHeaders(options.headers) });
+  return fetch(url, {
+    credentials: options.credentials || 'same-origin',
+    ...options,
+    headers: editorRequestHeaders(options.headers)
+  });
 }
 
 async function editorResponse(url) {

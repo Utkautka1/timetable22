@@ -31071,15 +31071,15 @@ function ConfigPanel({ config, setConfig }) {
 /* ============================== styles ============================== */
 
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  --ink: #1B2430; --ink-2: #232E3D; --paper: #F6F4EE; --paper-2: #ECE9DF;
-  --chalk: #EDEAE0; --board: #1E3A5F; --amber: #2F6FB0; --amber-soft: #CFE3F5;
-  --ink-soft: #5B6472; --line: #DAD5C7; --red: #B23A3A; --green: #3E7A52; --blue: #2E8B7A;
+  --ink: #0F172A; --ink-2: #1E293B; --paper: #F8FAFC; --paper-2: #F1F5F9;
+  --chalk: #FFFFFF; --board: #0284C7; --amber: #F97316; --amber-soft: #FFEDD5;
+  --ink-soft: #64748B; --line: #E2E8F0; --red: #EF4444; --green: #10B981; --blue: #0284C7;
 }
 
-.app-root { display: flex; min-height: 100vh; background: var(--paper); font-family: 'Manrope', sans-serif; color: var(--ink); }
+.app-root { display: flex; min-height: 100vh; background: var(--paper); font-family: 'Plus Jakarta Sans', sans-serif; color: var(--ink); }
 .loading-root { align-items: center; justify-content: center; }
 .spin { animation: spin 1s linear infinite; color: var(--amber); }
 @keyframes spin { to { transform: rotate(360deg); } }

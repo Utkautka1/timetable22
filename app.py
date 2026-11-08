@@ -2849,6 +2849,18 @@ def get_key(key):
             })
         except Exception:
             pass
+
+    if key == "schedule-data-v2":
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+            if isinstance(parsed, dict) and "users" in parsed:
+                from editor_transport import sanitize_users
+                parsed = dict(parsed)
+                parsed["users"] = sanitize_users(parsed.get("users") or [])
+                value = parsed
+        except Exception:
+            pass
+
     return jsonify({"key": key, "value": value})
 
 
@@ -8202,6 +8214,7 @@ def _serve_spa_index():
 @app.get("/")
 @app.get("/group/<path:route_id>")
 @app.get("/teacher/<path:route_id>")
+@app.get("/room/<path:route_id>")
 @app.get("/admin")
 @app.get("/admin/<path:spa_path>")
 @app.get("/specialty/<path:route_id>")
