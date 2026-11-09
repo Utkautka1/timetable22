@@ -5,7 +5,7 @@
 
 export function canonicalId(val) {
   let id = String(val || '');
-  const rx = /__(?:PUBW\d+|EXACT_W\d+|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$/i;
+  const rx = /__(?:PUBW\d+(?:_\d+)*|EXACT_W\d+(?:_\d+)*|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$/i;
   while (rx.test(id)) {
     id = id.replace(rx, '');
   }
@@ -17,7 +17,7 @@ export function subMatchesInstance(sub, inst) {
     .map(canonicalId)
     .filter(Boolean);
   if (!subIds.length) return false;
-  const instIds = [inst?.instId, inst?._publishedSourceInstId]
+  const instIds = [inst?.instId, inst?._publishedSourceInstId, inst?.id, inst?._originalInstId]
     .map(canonicalId)
     .filter(Boolean);
   return instIds.some(id => subIds.includes(id));
@@ -31,11 +31,12 @@ export function subMatchesView(sub, inst, kind, viewId) {
     return gids.includes(vid);
   }
   if (kind === 'teacher') {
-    const tids = [sub?.newTeacherId, sub?.teacherId, inst?.teacherId, sub?.importOldTeacherId].filter(Boolean).map(String);
+    const tids = [sub?.newTeacherId, sub?.teacherId, inst?.teacherId, sub?.importOldTeacherId, sub?.importNewTeacherId].filter(Boolean).map(String);
     return tids.includes(vid);
   }
   if (kind === 'room') {
-    const rids = [sub?.newRoomId, inst?.roomId, inst?.dedicatedRoomId, sub?.importOldRoom].filter(Boolean).map(String);
+    if (sub?.newFormat === 'remote') return false;
+    const rids = [sub?.newRoomId, sub?.importNewRoom, inst?.roomId, inst?.dedicatedRoomId, sub?.importOldRoom, inst?.assignment?.roomId].filter(Boolean).map(String);
     return rids.includes(vid);
   }
   return true;
@@ -59,7 +60,7 @@ function resolveSubject(sub, rawInst, subjects) {
 
 function resolveMovedSlot(sub, rawInst) {
   const period = Number.isFinite(Number(sub.targetPeriod)) ? Number(sub.targetPeriod) + 1 : Number(rawInst?.period || 1);
-  const roomId = sub.newFormat === 'remote' ? '' : (sub.newRoomId || rawInst?.roomId || '');
+  const roomId = sub.newFormat === 'remote' ? '' : (sub.newRoomId || sub.importNewRoom || rawInst?.roomId || sub.importOldRoom || '');
   const sourcePeriod = rawInst?.period ? Number(rawInst.period) - 1 : Math.max(0, (Number(sub.importOldPeriod) || 1) - 1);
   return { period, roomId, sourcePeriod };
 }
@@ -79,8 +80,9 @@ function createMovedSubOverride(sub, slot) {
 export function buildMovedInstance(sub, rawInst, dayIdx, dateISO, subjects = []) {
   const subj = resolveSubject(sub, rawInst, subjects);
   const slot = resolveMovedSlot(sub, rawInst);
-  const teacherId = sub.newTeacherId || rawInst?.teacherId || sub.importOldTeacherId || '';
+  const teacherId = sub.newTeacherId || rawInst?.teacherId || sub.importOldTeacherId || sub.teacherId || '';
   const groupId = rawInst?.groupId || sub.importGroupId || sub.groupId || '';
+  const subg = Number(rawInst?.subgroup || sub.subgroup || (sub.importSubgroup ? Number(sub.importSubgroup) : 0));
   return {
     ...(rawInst || {}),
     instId: `moved-${sub.id || sub.instId || Math.random()}`,
@@ -91,9 +93,9 @@ export function buildMovedInstance(sub, rawInst, dayIdx, dateISO, subjects = [])
     subjectName: subj.subjectName,
     teacherId,
     groupId,
-    groupIds: rawInst?.groupIds || (sub.importGroupId ? [sub.importGroupId] : []),
+    groupIds: rawInst?.groupIds || (groupId ? [groupId] : []),
     streamGroupIds: rawInst?.streamGroupIds || [],
-    subgroup: Number(rawInst?.subgroup || sub.subgroup || 0),
+    subgroup: subg,
     format: sub.newFormat || rawInst?.format || 'inperson',
     roomId: slot.roomId,
     sourceDate: sub.date,
@@ -109,7 +111,7 @@ export function collectMovedLessonsForDate(substitutions, instances, kind, viewI
   if (!targetDate || !Array.isArray(substitutions)) return [];
   const list = [];
   for (const sub of substitutions) {
-    if (sub?.type !== 'moved' || String(sub.targetDate) !== String(targetDate)) continue;
+    if (!['moved', 'excursion'].includes(sub?.type) || String(sub.targetDate) !== String(targetDate)) continue;
     const rawInst = (instances || []).find(i => subMatchesInstance(sub, i));
     if (!subMatchesView(sub, rawInst, kind, viewId)) continue;
     list.push(buildMovedInstance(sub, rawInst, dayIdx, targetDate, subjects));
@@ -147,11 +149,11 @@ function resolveRoomTypeCategory(room, typeObj) {
   return { isComputer, isArt, isLab, isGym };
 }
 
-function resolveRoomSizeLabel(sizeObj) {
+function resolveRoomSizeLabel(sizeObj, capacity = 0) {
   const sizeName = String(sizeObj?.name || '').toLowerCase();
-  if (sizeName.includes('бол')) return 'большая';
-  if (sizeName.includes('сред')) return 'средняя';
-  if (sizeName.includes('мал')) return 'малая';
+  if (sizeName.includes('бол') || (!sizeName && capacity >= 40)) return 'большая';
+  if (sizeName.includes('сред') || (!sizeName && capacity >= 20)) return 'средняя';
+  if (sizeName.includes('мал') || (!sizeName && capacity > 0)) return 'малая';
   return '';
 }
 
@@ -160,7 +162,7 @@ export function getRoomCategoryDetails(room, roomTypes = [], roomSizes = []) {
   const typeObj = (roomTypes || []).find(t => String(t.id) === String(room.typeId));
   const sizeObj = (roomSizes || []).find(s => String(s.id) === String(room.sizeId));
   const cats = resolveRoomTypeCategory(room, typeObj);
-  const sizeLabel = resolveRoomSizeLabel(sizeObj);
+  const sizeLabel = resolveRoomSizeLabel(sizeObj, room.capacity || 0);
   const typeLabel = cats.isArt ? 'художественная' : (cats.isComputer ? 'компьютерная' : (cats.isLab ? 'лаборатория' : (cats.isGym ? 'спортзал' : (typeObj?.name || ''))));
   const tagParts = [sizeLabel, typeLabel].filter(Boolean);
   const tagLabel = tagParts.join(' · ') || (room.capacity ? `${room.capacity} мест` : '');
@@ -169,3 +171,52 @@ export function getRoomCategoryDetails(room, roomTypes = [], roomSizes = []) {
   const descParts = [mainTypeTitle, sizeDesc, room.equipment].filter(Boolean);
   return { tagLabel, description: descParts.join(' · '), ...cats, sizeLabel, capacity: room.capacity || 0 };
 }
+
+function keyForCell(inst, sub) {
+  const teacherId = sub?.newTeacherId || inst?.teacherId || '';
+  const period = Number(inst?.period ?? -1);
+  return [period, inst?.groupId || '', teacherId, inst?.subjectId || '', inst?.lessonTypeId || inst?.typeId || '', inst?.format || ''].join('|');
+}
+
+export function collapsePublicSiblingSubgroups(cells = []) {
+  const out = [], consumed = new Set();
+  for (let i = 0; i < cells.length; i += 1) {
+    if (consumed.has(i)) continue;
+    const c = cells[i], inst = c?.inst || c, sub = c?.substitution || inst?.substitution || {};
+    const sg = Number(inst?.subgroup || 0);
+    if (!sub?.cancelled && !sub?.isCancelled && sg > 0) {
+      const k = keyForCell(inst, sub);
+      const sibIdx = cells.findIndex((other, j) => {
+        if (j <= i || consumed.has(j)) return false;
+        const oInst = other?.inst || other, oSub = other?.substitution || oInst?.substitution || {};
+        const osg = Number(oInst?.subgroup || 0);
+        return !oSub?.cancelled && !oSub?.isCancelled && osg > 0 && osg !== sg && keyForCell(oInst, oSub) === k;
+      });
+      if (sibIdx >= 0) {
+        consumed.add(sibIdx);
+        const oInst = cells[sibIdx]?.inst || cells[sibIdx];
+        out.push({ ...(c || {}), _publicCombinedSubgroups: [sg, Number(oInst?.subgroup || 0)].sort((a, b) => a - b) });
+        continue;
+      }
+    }
+    out.push(c);
+  }
+  return out;
+}
+
+export function publicChangeDetails(sub, inst, data = {}) {
+  if (!sub) return [];
+  const details = [], teachers = data.teachers || [], rooms = data.rooms || [];
+  if (sub.moved || sub.isMovedTarget) details.push({ type: 'move', label: 'Перенос занятия' });
+  const oldT = (teachers.find(t => String(t.id) === String(inst?.teacherId)) || {}).name || '';
+  const newT = (teachers.find(t => String(t.id) === String(sub.newTeacherId)) || {}).name || '';
+  if (newT && oldT && newT !== oldT) details.push({ type: 'teacher', label: `Замена преподавателя: ${oldT} → ${newT}` });
+  else if (newT && !oldT) details.push({ type: 'teacher', label: `Преподаватель: ${newT}` });
+  const oldR = (rooms.find(r => String(r.id) === String(inst?.roomId)) || {}).name || '';
+  const newR = (rooms.find(r => String(r.id) === String(sub.newRoomId)) || {}).name || '';
+  if (newR && oldR && newR !== oldR) details.push({ type: 'room', label: `Смена кабинета: ауд. ${oldR} → ауд. ${newR}` });
+  if (sub.newFormat === 'remote') details.push({ type: 'format', label: 'Изменение формата: дистанционно' });
+  if (sub.joinedSubgroup) details.push({ type: 'teacher', label: 'Замена преподавателя · объединение подгрупп' });
+  return details;
+}
+

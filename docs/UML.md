@@ -12,13 +12,14 @@ flowchart LR
         Hero[HeroScene3D.vue · Three.js Central Orange Orb]
         DrillDown[GroupDrillDown.vue · Specialty->Year->Group Drilldown & A11y]
         EntityPicker[TeacherRoomPicker.vue · Teachers 8-CK, Rooms Search & Category Tabs]
-        Viewer[ScheduleViewer.vue · Spatial Grid, Free Room Periods & Gaps]
-        Card[LessonCard.vue · Lesson Card, Target Moves & Room Badges]
+        Viewer[ScheduleViewer.vue · Spatial Grid, Free Room Periods, Gaps & Practices]
+        Card[LessonCard.vue · Lesson Card, Target Moves, Week Numbers & Room Badges]
         SpatialCard[SpatialCard.vue · 3D Specular Tilt]
-        Filter[FilterBar.vue · Breadcrumb, Subtitle & Week Navigation]
-        SubUtil[frontend/src/utils/scheduleSubstitutions.js · Moved Subs, Free Periods & Room Types]
+        Filter[FilterBar.vue · Breadcrumb, Subtitle & Published Weeks Nav]
+        PublicNotices[PublicNotices.vue · Official Announcements & Intro Banner]
+        SubUtil[frontend/src/utils/scheduleSubstitutions.js · Moved Subs, Sibling Collapse, Change Details & Free Periods]
         Modal[Modal.vue · Accessible Modal & Esc]
-        Bells[BellsSchedule.vue · Live Timer]
+        Bells[BellsSchedule.vue · Multi-Campus Live Timer & Tabs]
         Subs[SubstitutionsFeed.vue · Substitutions]
         AuthModal[AdminAuthModal.vue · Safe Login]
         Admin[AdminLayout.vue · Manager Dashboard]
@@ -33,6 +34,7 @@ flowchart LR
         App --> EntityPicker
         App --> Viewer
         Viewer --> Card
+        Viewer --> PublicNotices
         Viewer --> SubUtil
         EntityPicker --> SubUtil
         Card --> SubUtil
@@ -398,5 +400,10 @@ flowchart TD
     - **Изоляция исторических замен и привязка к датам:** Подтверждено, что ни одна из 153 исторических замен сентября/октября не проникает в ноябрьские недели. Все типы замен (`cancel`, `cancel_assignment`, `pending_move`, `moved`, `excursion`, `join_subgroup`, `sub`) проверены на соответствие каноническим дням недели и корректность полей переходов (`targetDate`, `targetPeriod`, `newTeacherId`, `note`).
     - **Целостность справочников и устойчивость к null:** Проверена валидность ссылок `subjectId`, `teacherId`, `roomId`, `groupId`. Доказана бессбойная работа генерации шардов при наличии `roomId: null` (дистанционные занятия), пустых или отсутствующих идентификаторах.
     - **Протокольный контракт:** Валидированы генерация `ETag`, корректность ответа `304 Not Modified`, заголовки `Cache-Control: no-store` и сжатие `gzip` с полной эквивалентностью распакованных данных.
+28. **Восстановление переносов занятий, классификатора кабинетов и чекера занятости аудиторий:**
+    - **Устранение потери переносов занятий (`moved`, `excursion`):** В генераторе шардов бэкенда (`app.py`), утилитах `scheduleSubstitutions.js` и парсинге `useScheduleData.js` нормализовано каноническое сопоставление составных идентификаторов (`__EXACT_W8_2__EXACT_W10_2`), включена поддержка импортированных переносов (`importGroupId`, `importOldTeacherId`, `importOldRoom`, `importNewRoom`) и сохранение вспомогательных `_publicMoveSupportOnly` инстансов без их преждевременного усечения. Перенесённые занятия корректно отображаются на целевых датах в расписании групп, преподавателей и аудиторий.
+    - **Классификация кабинетов по типам и вместимости:** Реализованы категории: `💻 Компьютерные`, `🎨 Художественные`, `🔬 Лаборатории`, `🏛 Большие (40+ мест)`, `📐 Средние (20–40 мест)`, `🛋 Малые (до 20 мест)`. На карточках аудиторий и в расписании выводятся соответствующие теги и вместимость мест.
+    - **Интерактивный чекер занятости аудиторий (`public-room-overview`):** В `TeacherRoomPicker.vue` интегрирован раскрывающийся блок проверки занятости аудиторий на любую дату и номер пары семестра по опубликованному расписанию (`/api/public-room-availability`), с раздельным выводом интерактивных чипов свободных кабинетов и списка занятых аудиторий с деталями занятий (группа, предмет, преподаватель).
+    - **Синхронизация карточки занятия по оригинальному сайту:** В `LessonCard.vue` восстановлено одновременное отображение строки исходного переноса (`↪ Перенесено с 04.11 · 1 пары`), деталей изменений (`↪ Перенос занятия`) и нижнего статус-бейджа (`ПЕРЕНОС`, `ОТМЕНА`, `ЗАМЕНА`).
 
 Устаревшие архивные копии (`tools/frontend/`, дубликаты планировщиков и временные отчёты) удалены из кодовой базы для поддержания чистоты репозитория.

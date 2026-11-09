@@ -58,6 +58,8 @@
             :selectedName="currentEntityName"
             :entitySubtitle="selectedKind === 'room' ? getRoomDetails(selectedId).description : ''"
             v-model:selectedWeek="selectedWeek"
+            :publishedWeeks="publishedWeeks"
+            :publicWeekSelectionEnabled="publicWeekSelectionEnabled"
             :hasSchedule="Boolean(currentSchedule.instances && currentSchedule.instances.length > 0)"
             @change-selection="handleChangeSelection"
             @export-csv="handleExportCSV"
@@ -73,6 +75,14 @@
             :loading="loading"
             :selectedWeek="selectedWeek"
             :semesterStart="semesterConfig.semesterStart"
+            :semesterConfig="semesterConfig"
+            :announcements="announcements"
+            :publicIntroText="publicIntroText"
+            :practices="practices"
+            :retakes="retakes"
+            :teachers="teachers"
+            :rooms="rooms"
+            :groups="groups"
             :getGroupName="getGroupName"
             :getSubjectName="getSubjectName"
             :getTeacherName="getTeacherName"
@@ -104,6 +114,7 @@
             :departments="departments"
             :roomTypes="roomTypes"
             :roomSizes="roomSizes"
+            :semesterConfig="semesterConfig"
             @select="handleSelectEntity"
           />
         </template>
@@ -191,6 +202,12 @@ const {
   specialties,
   lessonTypes,
   substitutions,
+  announcements,
+  publicIntroText,
+  retakes,
+  practices,
+  publishedWeeks,
+  publicWeekSelectionEnabled,
   semesterConfig,
   loadPublicIndex,
   loadScheduleShard,
@@ -291,7 +308,18 @@ function handleUpdateSubs(updatedSubs) {
 
 // 11. Экспорт в CSV
 function handleExportCSV() {
-  exportScheduleCSV(currentSchedule.value.instances, currentEntityName.value, getSubjectName, getTeacherName, getRoomName);
+  exportScheduleCSV(
+    currentSchedule.value.instances,
+    currentEntityName.value,
+    getSubjectName,
+    getTeacherName,
+    getRoomName,
+    {
+      getGroupName,
+      getLessonTypeName,
+      getPeriodTime
+    }
+  );
 }
 
 // 12. Печать расписания

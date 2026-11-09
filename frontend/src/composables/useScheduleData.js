@@ -29,7 +29,7 @@ const DEFAULT_TIMES = ['08:30–10:00', '10:10–11:40', '11:50–13:20', '14:00
 
 function canonicalPublicInstId(value) {
   let id = String(value || '');
-  const rx = /__(?:PUBW\d+|EXACT_W\d+|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$/i;
+  const rx = /__(?:PUBW\d+(?:_\d+)*|EXACT_W\d+(?:_\d+)*|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$/i;
   while (rx.test(id)) {
     id = id.replace(rx, '');
   }
@@ -38,7 +38,7 @@ function canonicalPublicInstId(value) {
 
 function matchSubWithLesson(sub, inst, dateISO) {
   if (!sub || !inst || !dateISO) return false;
-  if (sub.date && String(sub.date) !== String(dateISO)) return false;
+  if (!sub.date || String(sub.date) !== String(dateISO)) return false;
   const subIds = [sub.instId, sub.sourceInstId, sub.originalInstId]
     .map(canonicalPublicInstId)
     .filter(Boolean);
@@ -84,6 +84,12 @@ export function useScheduleData() {
   const roomTypes = computed(() => indexData.value?.data?.roomTypes || []);
   const roomSizes = computed(() => indexData.value?.data?.roomSizes || []);
   const semesterConfig = computed(() => indexData.value?.data?.config || {});
+  const announcements = computed(() => indexData.value?.data?.announcements || []);
+  const publicIntroText = computed(() => indexData.value?.data?.publicIntroText || '');
+  const retakes = computed(() => indexData.value?.data?.retakes || []);
+  const practices = computed(() => indexData.value?.data?.practices || []);
+  const publishedWeeks = computed(() => indexData.value?.data?.publishedWeeks || []);
+  const publicWeekSelectionEnabled = computed(() => indexData.value?.data?.publicWeekSelectionEnabled !== false);
 
   const substitutions = computed({
     get: () => {
@@ -125,11 +131,18 @@ export function useScheduleData() {
     syncBrowserUrl(init.kind, init.id, init.week, data?.groups || []);
   }
 
+  async function fetchEntityShard(kind, id, week) {
+    const shard = await publicScheduleGet(kind, id, { week, scope: 'week' });
+    if (shard?.schedule && (shard.schedule.instances || []).length) return shard;
+    const semShard = await publicScheduleGet(kind, id, { scope: 'semester' });
+    return semShard?.schedule ? semShard : shard;
+  }
+
   async function loadScheduleShard(kind, id, week = selectedWeek.value) {
     if (!id) return;
     loading.value = true;
     try {
-      const shard = await publicScheduleGet(kind, id, { week, scope: 'week' });
+      const shard = await fetchEntityShard(kind, id, week);
       currentSchedule.value = normalizeScheduleData(shard?.schedule);
       shardSubstitutions.value = Array.isArray(shard?.dataPatch?.substitutions) ? shard.dataPatch.substitutions : [];
     } catch (err) {
@@ -254,7 +267,7 @@ export function useScheduleData() {
     if (instance?._isMovedSynthetic && instance?.substitution) {
       return instance.substitution;
     }
-    const dateSubs = substitutionsByDate.value.get(String(dateISO)) || substitutions.value;
+    const dateSubs = substitutionsByDate.value.get(String(dateISO)) || [];
     return dateSubs.find(sub => matchSubWithLesson(sub, instance, dateISO));
   }
 
@@ -280,6 +293,12 @@ export function useScheduleData() {
     specialties,
     lessonTypes,
     substitutions,
+    announcements,
+    publicIntroText,
+    retakes,
+    practices,
+    publishedWeeks,
+    publicWeekSelectionEnabled,
     semesterConfig,
     loadPublicIndex,
     loadScheduleShard,

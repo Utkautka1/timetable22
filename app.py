@@ -911,9 +911,8 @@ def _canonical_public_inst_id(value):
     """Stable identity shared by working and week-publication occurrence ids."""
     import re
     sid = str(value or "")
-    # Compare original working id, stripping disposable publication & recovery suffixes
     rx = re.compile(
-        r"__(?:PUBW\d+|EXACT_W\d+|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$",
+        r"__(?:PUBW\d+(?:_\d+)*|EXACT_W\d+(?:_\d+)*|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$",
         re.IGNORECASE,
     )
     while rx.search(sid):
@@ -1191,38 +1190,38 @@ def _build_public_schedule_shard(project, kind, entity_id):
         for row in (project.get("loads") or [])
         if isinstance(row, dict) and str(row.get("id") or row.get("loadId") or "")
     }
+    extra_support_ids = set()
     if kind == "group":
-        raw_chosen = [inst for inst in instances if entity_id in _instance_group_ids(inst)]
-    elif kind == "teacher":
-        # Original teacher's instances plus source instances needed to render
-        # moved/substitute lessons assigned to this teacher. v1870 resolves the
-        # teacher from authoritative loadIds too; raw instance.teacherId can be
-        # stale after graph/stream operations even while the group card is valid.
         incoming_subs = [
             sub for sub in (project.get("substitutions") or [])
-            if isinstance(sub, dict) and _substitution_targets_teacher(sub, entity_id)
+            if isinstance(sub, dict) and (str(sub.get("groupId") or "") == entity_id or str(sub.get("importGroupId") or "") == entity_id)
         ]
-        extra_inst_ids = set()
         for sub in incoming_subs:
-            extra_inst_ids.update(_public_substitution_source_ids(sub))
+            extra_support_ids.update(_public_substitution_source_ids(sub))
+        raw_chosen = [
+            inst for inst in instances
+            if entity_id in _instance_group_ids(inst)
+            or bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))
+        ]
+    elif kind == "teacher":
+        incoming_subs = [
+            sub for sub in (project.get("substitutions") or [])
+            if isinstance(sub, dict) and (_substitution_targets_teacher(sub, entity_id) or str(sub.get("importOldTeacherId") or "") == entity_id)
+        ]
+        for sub in incoming_subs:
+            extra_support_ids.update(_public_substitution_source_ids(sub))
         raw_chosen = [
             inst for inst in instances
             if entity_id in _public_instance_teacher_ids(project, inst, loads_by_id)
-            # v1890: replacement receiver must see the source occurrence even when
-            # the public week id has been rewritten one or more times.
-            or bool(_public_instance_identity_ids(inst).intersection(extra_inst_ids))
+            or bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))
         ]
     elif kind == "room":
-        # v1864: public room timetable. Include lessons whose base assignment
-        # uses the room, plus source lessons moved/reassigned INTO this room by
-        # a date substitution. The client applies the overlay for the concrete
-        # date, so a lesson reassigned away from this room is not shown as busy.
         assignment = schedule.get("assignment") if isinstance(schedule.get("assignment"), dict) else {}
-        extra_inst_ids = set()
         for sub in (project.get("substitutions") or []):
-            if not isinstance(sub, dict) or str(sub.get("newRoomId") or "") != entity_id:
+            if not isinstance(sub, dict):
                 continue
-            extra_inst_ids.update(_public_substitution_source_ids(sub))
+            if str(sub.get("newRoomId") or "") == entity_id or str(sub.get("importNewRoom") or "") == entity_id or str(sub.get("importOldRoom") or "") == entity_id:
+                extra_support_ids.update(_public_substitution_source_ids(sub))
         raw_chosen = []
         for inst in instances:
             if not isinstance(inst, dict):
@@ -1243,18 +1242,16 @@ def _build_public_schedule_shard(project, kind, entity_id):
                         if rid:
                             room_ids.add(str(rid))
             if (entity_id in room_ids
-                or bool(_public_instance_identity_ids(inst).intersection(extra_inst_ids))):
+                or bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))):
                 raw_chosen.append(inst)
     else:
         raw_chosen = []
     chosen = []
     for inst in raw_chosen:
-        trimmed = _trim_instance_to_public_weeks(project, inst)
+        is_support = bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))
+        trimmed = inst if is_support else _trim_instance_to_public_weeks(project, inst)
         if trimmed is not None:
             if kind == "teacher":
-                # Shard-only compatibility metadata. Do not mutate the published
-                # snapshot; merely make every resolved teacher identity visible to
-                # the client before enrichInstanceStreamGroups() runs.
                 trimmed = dict(trimmed)
                 resolved = _public_instance_teacher_ids(project, inst, loads_by_id)
                 existing = [str(x) for x in (trimmed.get("teacherIds") or []) if str(x)]
@@ -1274,22 +1271,19 @@ def _build_public_schedule_shard(project, kind, entity_id):
 
 
 
-def _public_entity_data_patch(project, chosen_instances):
+def _public_entity_data_patch(project, chosen_instances, kind=None, entity_id=None):
     """Only heavy dictionaries referenced by one public entity."""
     chosen_instances = [x for x in (chosen_instances or []) if isinstance(x, dict)]
     inst_ids = set()
     for inst in chosen_instances:
         inst_ids.update(_public_instance_identity_ids(inst))
     load_ids = set()
-    group_ids = set()
-    teacher_ids = set()
-    room_ids = set()
+    group_ids = set([str(entity_id)]) if kind == "group" and entity_id else set()
+    teacher_ids = set([str(entity_id)]) if kind == "teacher" and entity_id else set()
+    room_ids = set([str(entity_id)]) if kind == "room" and entity_id else set()
     for inst in chosen_instances:
         if inst.get("loadId"):
             load_ids.add(str(inst.get("loadId")))
-        # v1891: retain load rows for EVERY participant of a public stream.
-        # Older stream cards can carry secondary groups only in groupIds, and
-        # dropping those rows makes student/teacher shards collapse to primary.
         group_ids.update(_instance_group_ids(inst))
         if inst.get("teacherId"):
             teacher_ids.add(str(inst.get("teacherId")))
@@ -1313,8 +1307,6 @@ def _public_entity_data_patch(project, chosen_instances):
         if not isinstance(row, dict):
             continue
         rid = str(row.get("id") or row.get("loadId") or "")
-        # Old/generated instances can miss loadId. In that case retain the small
-        # set of rows belonging to one of the shard's actual groups/teachers.
         if rid in load_ids or str(row.get("groupId") or "") in group_ids or str(row.get("teacherId") or "") in teacher_ids:
             loads.append(row)
     substitutions = [
@@ -1322,10 +1314,14 @@ def _public_entity_data_patch(project, chosen_instances):
         if isinstance(row, dict) and (
             bool(_public_substitution_source_ids(row).intersection(inst_ids))
             or str(row.get("groupId") or "") in group_ids
+            or str(row.get("importGroupId") or "") in group_ids
             or str(row.get("teacherId") or "") in teacher_ids
             or str(row.get("newTeacherId") or "") in teacher_ids
+            or str(row.get("importOldTeacherId") or "") in teacher_ids
             or str(row.get("roomId") or "") in room_ids
             or str(row.get("newRoomId") or "") in room_ids
+            or str(row.get("importOldRoom") or "") in room_ids
+            or str(row.get("importNewRoom") or "") in room_ids
         )
     ]
     return {"loads": loads, "substitutions": substitutions}
@@ -1360,7 +1356,7 @@ def _public_schedule_shard_for_week(project, schedule, week_number):
         semester_monday = None
     if semester_monday is not None:
         for sub in (project.get("substitutions") or []):
-            if not isinstance(sub, dict) or str(sub.get("type") or "") != "moved":
+            if not isinstance(sub, dict) or str(sub.get("type") or "") not in {"moved", "excursion"}:
                 continue
             target_date = str(sub.get("targetDate") or "")
             try:
@@ -1601,7 +1597,7 @@ def _prebuild_public_snapshot_shards(project, marker, change=None):
         if rebuild_semester:
             full_payload = {
                 "schedule": full_schedule,
-                "dataPatch": _public_entity_data_patch(source, full_instances),
+                "dataPatch": _public_entity_data_patch(source, full_instances, kind, entity_id),
                 "marker": marker, "kind": kind, "id": entity_id, "scope": "semester",
             }
             _write_public_shard_file(os.path.join(entity_dir, "semester.json"), full_payload)
@@ -1613,7 +1609,7 @@ def _prebuild_public_snapshot_shards(project, marker, change=None):
             week_instances = week_schedule.get("instances") or []
             week_payload = {
                 "schedule": week_schedule,
-                "dataPatch": _public_entity_data_patch(source, week_instances),
+                "dataPatch": _public_entity_data_patch(source, week_instances, kind, entity_id),
                 "marker": marker, "kind": kind, "id": entity_id, "scope": "week", "week": week,
             }
             _write_public_shard_file(os.path.join(entity_dir, f"week-{week}.json"), week_payload)
@@ -1817,7 +1813,7 @@ def _ensure_public_shard_on_demand(kind, entity_id, scope="semester", week=0, _r
                 instances = schedule.get("instances") or []
                 payload = {
                     "schedule": schedule,
-                    "dataPatch": _public_entity_data_patch(project, instances),
+                    "dataPatch": _public_entity_data_patch(project, instances, kind, str(entity_id)),
                     "marker": marker,
                     "kind": kind,
                     "id": str(entity_id),

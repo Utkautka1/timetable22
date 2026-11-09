@@ -148,6 +148,109 @@
         <p class="picker-subtitle">Выберите корпус, тип или воспользуйтесь поиском по кабинетам</p>
       </div>
 
+      <!-- Блок оперативной проверки занятости всех кабинетов на дату и пару -->
+      <section class="public-room-overview">
+        <button
+          type="button"
+          class="public-room-overview-toggle"
+          :aria-expanded="roomOverviewOpen"
+          @click="toggleRoomOverview"
+        >
+          <span class="public-room-overview-toggle-title">
+            <svg class="toggle-icon-svg" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+              <line x1="16" y1="2" x2="16" y2="6"></line>
+              <line x1="8" y1="2" x2="8" y2="6"></line>
+              <line x1="3" y1="10" x2="21" y2="10"></line>
+            </svg>
+            Проверить занятость кабинетов
+          </span>
+          <span class="public-room-overview-toggle-right">
+            {{ roomOverviewOpen ? 'Свернуть' : 'Выбрать дату и пару' }}
+            <span aria-hidden="true">{{ roomOverviewOpen ? '▴' : '▾' }}</span>
+          </span>
+        </button>
+
+        <div v-if="roomOverviewOpen" class="public-room-overview-body">
+          <div class="public-room-overview-filters">
+            <label>
+              Дата
+              <input
+                v-model="roomOverviewDate"
+                type="date"
+                :min="semesterConfig?.semesterStart || undefined"
+                :max="semesterConfig?.semesterEnd || undefined"
+                class="overview-date-input"
+              />
+            </label>
+            <label>
+              Пара
+              <select v-model.number="roomOverviewPeriod" class="overview-period-select">
+                <option v-for="p in availablePeriods" :key="p.index" :value="p.index">
+                  {{ p.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+
+          <div v-if="roomOverviewLoading" class="public-room-overview-info">
+            Проверяем занятость…
+          </div>
+
+          <div v-else-if="roomOverviewError" class="public-room-overview-info error" role="alert">
+            {{ roomOverviewError }}
+          </div>
+
+          <div v-else-if="roomOverviewData" class="public-room-overview-content">
+            <div class="public-room-overview-summary">
+              <span><b>{{ freeOverviewRooms.length }}</b> свободно</span>
+              <span><b>{{ busyOverviewRooms.length }}</b> занято</span>
+              <small>По опубликованному расписанию</small>
+            </div>
+
+            <div class="public-room-overview-section">
+              <h3>Свободные кабинеты <span>{{ freeOverviewRooms.length }}</span></h3>
+              <p v-if="!freeOverviewRooms.length" class="public-room-overview-empty">
+                Свободных кабинетов нет
+              </p>
+              <div v-else class="public-room-overview-chips">
+                <button
+                  v-for="r in freeOverviewRooms"
+                  :key="r.id"
+                  type="button"
+                  class="public-room-chip"
+                  :title="`Открыть расписание кабинета ${r.name}`"
+                  @click="$emit('select', r.id)"
+                >
+                  {{ r.name }}
+                </button>
+              </div>
+            </div>
+
+            <div class="public-room-overview-section">
+              <h3>Занятые кабинеты <span>{{ busyOverviewRooms.length }}</span></h3>
+              <p v-if="!busyOverviewRooms.length" class="public-room-overview-empty">
+                На эту пару занятых кабинетов нет
+              </p>
+              <div v-else class="public-room-overview-busy-list">
+                <button
+                  v-for="r in busyOverviewRooms"
+                  :key="r.id"
+                  type="button"
+                  class="public-room-busy-row"
+                  :title="`Открыть расписание кабинета ${r.name}`"
+                  @click="$emit('select', r.id)"
+                >
+                  <strong>{{ r.name }}</strong>
+                  <span>{{ formatBusyLessonDetails(r) }}</span>
+                  <span class="busy-arrow" aria-hidden="true">›</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- Панель поиска и фильтрации аудиторий -->
       <div class="teacher-toolbar">
         <div class="search-input-box">
@@ -238,15 +341,17 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { getRoomCategoryDetails } from '../../utils/scheduleSubstitutions.js';
+import { publicRoomAvailabilityGet } from '../../storage.js';
 
 const props = defineProps({
   role: { type: String, default: 'teacher' },
   items: { type: Array, default: () => [] },
   departments: { type: Array, default: () => [] },
   roomTypes: { type: Array, default: () => [] },
-  roomSizes: { type: Array, default: () => [] }
+  roomSizes: { type: Array, default: () => [] },
+  semesterConfig: { type: Object, default: () => ({}) }
 });
 
 defineEmits(['select']);
@@ -263,10 +368,83 @@ const roomCategoryTabs = [
   { id: 'computer', label: '💻 Компьютерные' },
   { id: 'art', label: '🎨 Художественные' },
   { id: 'lab', label: '🔬 Лаборатории' },
-  { id: 'big', label: '🏛 Большие' },
-  { id: 'medium', label: '📐 Средние' },
-  { id: 'small', label: '🛋 Малые' }
+  { id: 'big', label: '🏛 Большие (40+ мест)' },
+  { id: 'medium', label: '📐 Средние (20–40 мест)' },
+  { id: 'small', label: '🛋 Малые (до 20 мест)' }
 ];
+
+function getInitialOverviewDate(cfg) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (cfg?.semesterStart && today < cfg.semesterStart) return cfg.semesterStart;
+  if (cfg?.semesterEnd && today > cfg.semesterEnd) return cfg.semesterEnd;
+  return today;
+}
+
+const roomOverviewOpen = ref(false);
+const roomOverviewDate = ref(getInitialOverviewDate(props.semesterConfig));
+const roomOverviewPeriod = ref(0);
+const roomOverviewData = ref(null);
+const roomOverviewLoading = ref(false);
+const roomOverviewError = ref('');
+
+function toggleRoomOverview() {
+  roomOverviewOpen.value = !roomOverviewOpen.value;
+  if (roomOverviewOpen.value && !roomOverviewData.value && !roomOverviewLoading.value) {
+    loadRoomAvailability();
+  }
+}
+
+async function loadRoomAvailability() {
+  if (!roomOverviewDate.value) return;
+  roomOverviewLoading.value = true;
+  roomOverviewError.value = '';
+  try {
+    const res = await publicRoomAvailabilityGet(roomOverviewDate.value, roomOverviewPeriod.value);
+    if (!res || res.error) {
+      roomOverviewError.value = res?.error || 'Не удалось загрузить занятость кабинетов';
+      roomOverviewData.value = null;
+    } else {
+      roomOverviewData.value = res;
+    }
+  } catch {
+    roomOverviewError.value = 'Ошибка при проверке занятости кабинетов';
+    roomOverviewData.value = null;
+  } finally {
+    roomOverviewLoading.value = false;
+  }
+}
+
+watch([roomOverviewDate, roomOverviewPeriod], () => {
+  if (roomOverviewOpen.value) loadRoomAvailability();
+});
+
+const availablePeriods = computed(() => {
+  const times = props.semesterConfig?.periodTimes || [];
+  const count = Math.max(times.length, Number(props.semesterConfig?.periodsPerDay) || 7);
+  return Array.from({ length: count }, (_, i) => ({
+    index: i,
+    label: `${i + 1} пара · ${times[i] || ''}`
+  }));
+});
+
+const sortedOverviewRooms = computed(() => {
+  const roomsList = roomOverviewData.value?.rooms || [];
+  return [...roomsList].sort((a, b) => String(a.name).localeCompare(String(b.name), 'ru', { numeric: true }));
+});
+
+const freeOverviewRooms = computed(() => {
+  return sortedOverviewRooms.value.filter(r => !r.busy);
+});
+
+const busyOverviewRooms = computed(() => {
+  return sortedOverviewRooms.value.filter(r => r.busy);
+});
+
+function formatBusyLessonDetails(room) {
+  const lessons = room?.lessons || [];
+  if (!lessons.length) return 'Занят';
+  return lessons.map(l => [l.group, l.subject, l.teacher].filter(Boolean).join(' · ')).join('; ');
+}
 
 const totalTeachersCount = computed(() => {
   return props.role === 'teacher' ? props.items.length : 0;
@@ -342,7 +520,16 @@ function matchTeacherQuery(t, query) {
   const q = query.toLowerCase().replace(/ё/g, 'е').trim();
   const name = (t.name || '').toLowerCase().replace(/ё/g, 'е');
   const prof = (t.profile || '').toLowerCase().replace(/ё/g, 'е');
-  return name.includes(q) || prof.includes(q);
+  const dep = (deptNameMap.value.get(String(t.departmentId)) || '').toLowerCase().replace(/ё/g, 'е');
+  return name.includes(q) || prof.includes(q) || dep.includes(q);
+}
+
+function getTeacherScore(name, q) {
+  const n = (name || '').toLowerCase().replace(/ё/g, 'е');
+  if (n === q) return 0;
+  if (n.startsWith(q)) return 1;
+  if (n.split(/\s+/).some(p => p.startsWith(q))) return 2;
+  return 3;
 }
 
 function matchTeacherLetter(t, letter) {
@@ -364,11 +551,14 @@ const filteredTeachers = computed(() => {
   const letter = activeLetter.value;
   const query = searchQuery.value;
   if (!deptId && !letter && !query) return sortedTeachers.value;
-  return sortedTeachers.value.filter(t => 
+  const list = sortedTeachers.value.filter(t => 
     matchTeacherDept(t, deptId) &&
     matchTeacherLetter(t, letter) &&
     matchTeacherQuery(t, query)
   );
+  if (!query) return list;
+  const q = query.toLowerCase().replace(/ё/g, 'е').trim();
+  return list.sort((a, b) => getTeacherScore(a.name, q) - getTeacherScore(b.name, q) || a.name.localeCompare(b.name, 'ru'));
 });
 
 const teachersGroupedByDept = computed(() => {
@@ -405,7 +595,7 @@ function matchRoomCategory(r, cat) {
   if (cat === 'computer') return Boolean(d.isComputer);
   if (cat === 'art') return Boolean(d.isArt);
   if (cat === 'lab') return Boolean(d.isLab);
-  if (cat === 'big') return d.sizeLabel === 'большая';
+  if (cat === 'big' || cat === 'large') return d.sizeLabel === 'большая';
   if (cat === 'medium') return d.sizeLabel === 'средняя';
   if (cat === 'small') return d.sizeLabel === 'малая';
   return true;
@@ -919,6 +1109,217 @@ const displayedCampusGroups = computed(() => {
   padding: 1px 5px;
   border-radius: 4px;
   white-space: nowrap;
+}
+
+/* Блок проверки занятости кабинетов (по оригинальному App.jsx) */
+.public-room-overview {
+  position: relative;
+  z-index: 2;
+  margin: 0 0 20px 0;
+  border: 1px solid rgba(220, 226, 234, 0.9);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+}
+
+.public-room-overview-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 0;
+  background: #f4f7fb;
+  color: #193d6a;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.public-room-overview-toggle:hover {
+  background: #eef3f9;
+}
+
+.public-room-overview-toggle-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.public-room-overview-toggle-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.public-room-overview-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.public-room-overview-filters {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.public-room-overview-filters label {
+  display: flex;
+  flex: 1;
+  min-width: 180px;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.overview-date-input,
+.overview-period-select {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid #d8dfe9;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 13.5px;
+  color: #0f172a;
+}
+
+.public-room-overview-info {
+  padding: 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.public-room-overview-info.error {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-radius: 8px;
+}
+
+.public-room-overview-summary {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: #334155;
+}
+
+.public-room-overview-summary span b {
+  color: #0284c7;
+}
+
+.public-room-overview-summary small {
+  color: #64748b;
+  margin-left: auto;
+}
+
+.public-room-overview-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.public-room-overview-section h3 {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.public-room-overview-section h3 span {
+  font-size: 12px;
+  background: #f1f5f9;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: #475569;
+}
+
+.public-room-overview-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.public-room-chip {
+  padding: 6px 12px;
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.public-room-chip:hover {
+  background: #dcfce7;
+  border-color: #86efac;
+  transform: translateY(-1px);
+}
+
+.public-room-overview-busy-list {
+  display: grid;
+  gap: 6px;
+}
+
+.public-room-busy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #9a3412;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.15s ease;
+}
+
+.public-room-busy-row:hover {
+  background: #ffedd5;
+}
+
+.public-room-busy-row strong {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  min-width: 44px;
+}
+
+.public-room-busy-row span {
+  font-size: 12px;
+  color: #7c2d12;
+  flex: 1;
+}
+
+.busy-arrow {
+  font-size: 16px;
+  color: #ea580c;
+}
+
+.public-room-overview-empty {
+  color: #64748b;
+  font-size: 13px;
+  margin: 4px 0;
 }
 
 @media (max-width: 640px) {

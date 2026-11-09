@@ -678,6 +678,22 @@ export async function publicStatusGet() {
   }
 }
 
+export async function publicRoomAvailabilityGet(date, period) {
+  try {
+    const p = Math.max(0, Number(period) || 0);
+    const qs = `date=${encodeURIComponent(String(date || ''))}&period=${p}&_t=${Date.now()}`;
+    const res = await storageFetch(`/api/public-room-availability?${qs}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (e) {
+    console.error('publicRoomAvailabilityGet failed', e);
+    return null;
+  }
+}
+
 export async function publicBootstrapGet() {
   try {
     // v1628: публичный bootstrap имеет короткий HTTP cache + ETag на сервере.

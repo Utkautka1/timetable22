@@ -34,14 +34,11 @@
         </div>
 
         <div class="badges-row">
-          <span v-if="lessonType" :class="['type-badge', typeBadgeClass]">
-            {{ lessonType }}
-          </span>
           <span v-if="isRemote" class="format-badge remote" title="Дистанционное занятие">
             Дистант
           </span>
-          <span v-if="instance?.subgroup" class="subgroup-badge">
-            {{ instance.subgroup }} подгруппа
+          <span v-if="subgroupBadge" class="subgroup-badge">
+            {{ subgroupBadge }}
           </span>
           <span 
             v-if="effectiveGroups.length > 1" 
@@ -62,11 +59,25 @@
 
       <!-- Название дисциплины / Мероприятия -->
       <h4 :class="['subject-title', { 'cancelled-text': isCancelled }]">
-        {{ effectiveSubject }}
+        <span class="subject-icon">🎓</span>
+        {{ displaySubjectTitle }}
+        <span v-if="subgroupBadge" class="subgroup-inline"> ({{ subgroupBadge }})</span>
+        <span v-if="weekNumbersText" class="week-numbers-inline"> · {{ weekNumbersText }}</span>
+        <span v-if="isStream" class="stream-inline"> · 🔗 поток</span>
       </h4>
 
-      <!-- Строка пояснения переноса -->
-      <div v-if="sourceMoveText" class="source-move-row">
+      <!-- Строка пояснения переноса / деталей изменений -->
+      <div v-if="changeDetails.length" class="change-details-list">
+        <div v-for="(ch, idx) in changeDetails" :key="idx" class="source-move-row">
+          <span class="source-move-arrow">↪</span>
+          <span class="source-move-text">{{ ch.label }}</span>
+        </div>
+        <div v-if="sourceMoveText && !hasSourceMoveInDetails" class="source-move-row">
+          <span class="source-move-arrow">↪</span>
+          <span class="source-move-text">{{ sourceMoveText }}</span>
+        </div>
+      </div>
+      <div v-else-if="sourceMoveText" class="source-move-row">
         <span class="source-move-arrow">↪</span>
         <span class="source-move-text">{{ sourceMoveText }}</span>
       </div>
@@ -134,7 +145,7 @@
         </div>
 
         <!-- Режим ГРУППА: преподаватель с переходом -->
-        <template v-else>
+        <template v-else-if="hasRealTeacher">
           <button
             v-if="effectiveTeacherId"
             type="button"
@@ -160,9 +171,20 @@
           :class="['room-chip', { 'room-substituted': hasRoomSub }]"
           :title="`Аудитория: ${effectiveRoom}${roomCategoryBadge ? ` (${roomCategoryBadge})` : ''}`"
         >
-          <span class="room-name">{{ formattedRoom }}</span>
+          <span class="room-name">📍 {{ formattedRoom }}</span>
           <span v-if="roomCategoryBadge" class="room-tag-mini">{{ roomCategoryBadge }}</span>
         </div>
+        <div v-else-if="isRemote" class="room-chip room-remote" title="Дистанционное занятие">
+          <span class="room-name">📍 дистанционно</span>
+        </div>
+
+        <!-- Нижний бейдж статуса замены/переноса (по скриншоту 1: ПЕРЕНОС) -->
+        <span 
+          v-if="statusBadgeLabel" 
+          :class="['sub-badge', statusBadgeClass]"
+        >
+          {{ statusBadgeLabel }}
+        </span>
       </div>
     </div>
   </SpatialCard>
@@ -171,7 +193,8 @@
 <script setup>
 import { computed } from 'vue';
 import SpatialCard from '../common/SpatialCard.vue';
-import { formatDateDM } from '../../utils/scheduleSubstitutions.js';
+import { weekNumbersLabel } from '../../fastScheduleLookups.js';
+import { formatDateDM, publicChangeDetails } from '../../utils/scheduleSubstitutions.js';
 
 const props = defineProps({
   role: { type: String, default: 'group' },
@@ -182,6 +205,9 @@ const props = defineProps({
   teacherName: { type: String, default: '' },
   roomName: { type: String, default: '' },
   substitution: { type: Object, default: null },
+  semesterConfig: { type: Object, default: () => ({}) },
+  teachers: { type: Array, default: () => [] },
+  rooms: { type: Array, default: () => [] },
   getGroupName: { type: Function, default: null },
   getTeacherName: { type: Function, default: null },
   getRoomName: { type: Function, default: null },
@@ -340,11 +366,22 @@ const effectiveSubject = computed(() => {
   return props.subjectName || 'Дисциплина без названия';
 });
 
+const displaySubjectTitle = computed(() => {
+  const s = String(effectiveSubject.value || '').trim();
+  const t = String(lessonType.value || '').trim();
+  return t ? `${s}, ${t}` : s;
+});
+
 const effectiveTeacher = computed(() => {
   if (props.substitution?.newTeacherId && props.getTeacherName) {
     return props.getTeacherName(props.substitution.newTeacherId);
   }
-  return props.teacherName || 'Преподаватель не назначен';
+  return props.teacherName || '';
+});
+
+const hasRealTeacher = computed(() => {
+  const t = String(effectiveTeacher.value || '').trim();
+  return Boolean(t && t !== 'Преподаватель не назначен' && t !== '—');
 });
 
 const effectiveRoom = computed(() => {
@@ -370,10 +407,10 @@ function formatRoomLabel(rawRoom) {
   if (lower.includes('дистант') || lower === 'до' || lower.includes('онлайн') || lower.includes('уточн')) {
     return '';
   }
-  if (lower.includes('зал') || lower.includes('ауд') || lower.includes('каб')) {
+  if (lower.includes('зал') || lower.includes('ауд') || lower.includes('каб') || lower.includes('бассейн') || lower.includes('мастерск')) {
     return text;
   }
-  return `Ауд. ${text}`;
+  return `ауд. ${text}`;
 }
 
 const formattedRoom = computed(() => {
@@ -425,12 +462,80 @@ const subDetails = computed(() => {
   if (isMovedAway.value) return resolveMovedAwayText(props.substitution);
   if (isMovedTarget.value) return props.substitution.note || 'Перенос занятия';
   if (props.substitution.note) return props.substitution.note;
+  if (props.substitution.type === 'cancel_assignment') return 'Отменено с выдачей задания';
+  if (props.substitution.type === 'pending_move') return 'Отменено · перенос будет назначен позже';
+  if (props.substitution.type === 'excursion') {
+    return props.role === 'teacher' ? 'Отменено · у группы экскурсия' : 'Мероприятие: Экскурсия';
+  }
   if (isCancelled.value) return 'Занятие отменено';
   if (props.substitution.newTeacherId) return 'Замена преподавателя';
   if (props.substitution.newRoomId) return 'Смена аудитории';
   if (props.substitution.newSubjectId) return 'Замена предмета';
   return 'Изменение в расписании';
 });
+
+const weekNumbersText = computed(() => {
+  if (props.role === 'group') return '';
+  const inst = props.instance;
+  if (!inst?.weekPattern || inst.weekPattern === 'all') return '';
+  return weekNumbersLabel(props.semesterConfig, inst);
+});
+
+const isStream = computed(() => {
+  const inst = props.instance;
+  return Boolean((inst?.streamGroupIds || []).length > 0 || (inst?.streamParticipants || []).length > 1);
+});
+
+const subgroupBadge = computed(() => {
+  const combined = props.instance?._publicCombinedSubgroups;
+  if (Array.isArray(combined) && combined.length > 1) {
+    return `Подгруппы ${combined.join(', ')}`;
+  }
+  const sg = Number(props.instance?.subgroup || 0);
+  return sg > 0 ? `п/г ${sg}` : '';
+});
+
+const changeDetails = computed(() => {
+  const sub = props.substitution || props.instance?.substitution;
+  if (!sub) return [];
+  return publicChangeDetails(sub, props.instance, {
+    teachers: props.teachers,
+    rooms: props.rooms
+  });
+});
+
+const hasSourceMoveInDetails = computed(() => {
+  return changeDetails.value.some(ch => String(ch.label).startsWith('Перенесено с'));
+});
+
+const statusBadgeInfo = computed(() => {
+  const sub = props.substitution || props.instance?.substitution;
+  if (!sub) return null;
+  if (isMovedTarget.value || sub.moved || sub.isMovedTarget) {
+    return { label: 'ПЕРЕНОС', class: 'moved' };
+  }
+  if (sub.excursion || sub.type === 'excursion') {
+    return { label: props.role === 'teacher' ? 'ОТМЕНА · ЭКСКУРСИЯ' : 'ЭКСКУРСИЯ', class: 'cancel' };
+  }
+  if (sub.movedAway || isMovedAway.value) {
+    return { label: 'ПЕРЕНОС', class: 'moved' };
+  }
+  if (sub.pendingMove || sub.type === 'pending_move') {
+    return { label: 'ПЕРЕНОС', class: 'pending' };
+  }
+  if (sub.assignmentIssued || sub.type === 'cancel_assignment') {
+    return { label: 'ВЫДАЧА ЗАДАНИЯ', class: 'assignment' };
+  }
+  if (isCancelled.value || sub.cancelled) {
+    return { label: 'ОТМЕНА', class: 'cancel' };
+  }
+  if (hasTeacherSub.value) return { label: 'ЗАМЕНА', class: 'replacement' };
+  if (hasRoomSub.value) return { label: 'СМЕНА КАБИНЕТА', class: 'room-change' };
+  return { label: 'ИЗМЕНЕНИЕ', class: 'default' };
+});
+
+const statusBadgeLabel = computed(() => statusBadgeInfo.value?.label || '');
+const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
 </script>
 
 <style scoped>
@@ -882,5 +987,79 @@ const subDetails = computed(() => {
     font-size: 10.5px;
     padding: 2px 6px;
   }
+}
+.change-details-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 2px;
+}
+
+.week-numbers-inline,
+.stream-inline {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-secondary, #64748b);
+}
+
+.subject-icon {
+  font-size: 14px;
+  margin-right: 4px;
+}
+
+.room-chip.room-remote {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+}
+
+.room-chip.room-remote .room-name {
+  color: #0284c7;
+  font-weight: 600;
+}
+
+.sub-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--blue-600, #2563eb);
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: 999px;
+  width: fit-content;
+}
+
+.sub-badge.moved {
+  background: #d49b13 !important;
+  color: #ffffff !important;
+}
+
+.sub-badge.cancel {
+  background: #c94a4a !important;
+  color: #ffffff !important;
+}
+
+.sub-badge.replacement {
+  background: #d49b13 !important;
+  color: #ffffff !important;
+}
+
+.sub-badge.assignment {
+  background: #8d5d24 !important;
+  color: #ffffff !important;
+}
+
+.sub-badge.pending {
+  background: #d49b13 !important;
+  color: #ffffff !important;
+}
+
+.sub-badge.room-change {
+  background: #0284c7 !important;
+  color: #ffffff !important;
 }
 </style>
