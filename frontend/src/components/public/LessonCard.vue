@@ -40,7 +40,7 @@
             {{ instance.subgroup }} подгруппа
           </span>
           <span 
-            v-if="effectiveGroups.length > 1 && role === 'group'" 
+            v-if="effectiveGroups.length > 1" 
             class="stream-badge" 
             :title="`Потоковое занятие для групп: ${streamGroupsTitle}`"
           >
@@ -81,6 +81,18 @@
             </button>
             <span v-if="!effectiveGroups.length" class="no-group-text">Группа не указана</span>
           </div>
+          <button
+            v-if="hasTeacherSub && effectiveTeacherId"
+            type="button"
+            class="teacher-info teacher-btn replacement-teacher-btn"
+            :title="`Замена преподавателя: ${effectiveTeacher}`"
+            @click.stop="handleTeacherClick"
+          >
+            <svg class="teacher-icon-svg" viewBox="0 0 16 16" width="12" height="12" fill="currentColor" aria-hidden="true">
+              <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm2-3a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm4 8c0-2.21-3.58-3.5-6-3.5S2 10.79 2 13v1h12v-1zm-1.2 0H3.2c.45-1.21 2.5-2.3 4.8-2.3s4.35 1.09 4.8 2.3z"/>
+            </svg>
+            <span class="teacher-name">Замена: {{ effectiveTeacher }}</span>
+          </button>
         </div>
 
         <!-- Режим АУДИТОРИЯ: группа + преподаватель -->
@@ -134,7 +146,7 @@
         </template>
 
         <div 
-          v-if="formattedRoom && !isRemote" 
+          v-if="formattedRoom && !isRemote && !isCancelled" 
           :class="['room-chip', { 'room-substituted': hasRoomSub }]"
           :title="`Аудитория: ${effectiveRoom}`"
         >
@@ -153,6 +165,7 @@ const props = defineProps({
   role: { type: String, default: 'group' },
   instance: { type: Object, required: true },
   period: { type: Number, required: true },
+  dateISO: { type: String, default: '' },
   subjectName: { type: String, default: '' },
   teacherName: { type: String, default: '' },
   roomName: { type: String, default: '' },
@@ -169,7 +182,12 @@ const props = defineProps({
 const emit = defineEmits(['select-teacher', 'select-group']);
 
 const effectiveTeacherId = computed(() => {
-  return props.substitution?.newTeacherId || props.instance?.teacherId || '';
+  return props.substitution?.newTeacherId || props.substitution?.teacherId || props.instance?.teacherId || '';
+});
+
+const hasTeacherSub = computed(() => {
+  const newT = props.substitution?.newTeacherId || props.substitution?.teacherId;
+  return Boolean(newT && String(newT) !== String(props.instance?.teacherId || ''));
 });
 
 function handleTeacherClick() {
@@ -193,6 +211,9 @@ const effectiveGroups = computed(() => {
     }
   };
   if (props.instance?.groupId) addGid(props.instance.groupId);
+  if (Array.isArray(props.instance?.groupIds)) {
+    props.instance.groupIds.forEach(addGid);
+  }
   if (Array.isArray(props.instance?.streamGroupIds)) {
     props.instance.streamGroupIds.forEach(addGid);
   }
@@ -210,7 +231,7 @@ const hasSub = computed(() => Boolean(props.substitution));
 
 const isCancelled = computed(() => {
   const type = props.substitution?.type;
-  return type === 'cancel' || type === 'cancel_assignment';
+  return ['cancel', 'cancel_assignment', 'pending_move', 'moved', 'excursion'].includes(type);
 });
 
 const isEvent = computed(() => {
@@ -245,7 +266,9 @@ const periodTime = computed(() => {
   if (!props.getPeriodTime) return '';
   return props.getPeriodTime(props.period, {
     groupId: props.instance?.groupId,
-    dayIndex: props.instance?.day
+    dayIndex: props.instance?.day,
+    dateStr: props.dateISO,
+    roomId: effectiveRoomId.value
   });
 });
 

@@ -68,6 +68,7 @@
                 :role="role"
                 :instance="inst"
                 :period="Number(inst.period) || 1"
+                :dateISO="dayObj.dateISO"
                 :subjectName="getSubjectName(inst.subjectId)"
                 :teacherName="getTeacherName(inst.teacherId)"
                 :roomName="getRoomName(inst.roomId || inst.dedicatedRoomId || inst.preferredRoomIds?.[0])"
@@ -123,21 +124,24 @@ const MONTH_NAMES = [
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
 ];
 
-function formatCalendarDate(startStr, weekNum, dayIdx) {
-  if (!startStr || !weekNum) return '';
-  const dt = new Date(startStr);
-  if (isNaN(dt.getTime())) return '';
+function computeScheduleDate(startStr, weekNum, dayIdx) {
+  if (!startStr || !weekNum) return null;
+  const p = String(startStr).split('-').map(Number);
+  if (p.length < 3 || p.some(isNaN)) return null;
+  const dt = new Date(p[0], p[1] - 1, p[2], 12, 0, 0);
   const mondayOffset = (dt.getDay() + 6) % 7;
-  dt.setDate(dt.getDate() - mondayOffset + (weekNum - 1) * 7 + dayIdx);
-  return `${dt.getDate()} ${MONTH_NAMES[dt.getMonth()]}`;
+  dt.setDate(dt.getDate() - mondayOffset + (Number(weekNum) - 1) * 7 + Number(dayIdx));
+  return dt;
+}
+
+function formatCalendarDate(startStr, weekNum, dayIdx) {
+  const dt = computeScheduleDate(startStr, weekNum, dayIdx);
+  return dt ? `${dt.getDate()} ${MONTH_NAMES[dt.getMonth()]}` : '';
 }
 
 function formatISODate(startStr, weekNum, dayIdx) {
-  if (!startStr || !weekNum) return '';
-  const dt = new Date(startStr);
-  if (isNaN(dt.getTime())) return '';
-  const mondayOffset = (dt.getDay() + 6) % 7;
-  dt.setDate(dt.getDate() - mondayOffset + (weekNum - 1) * 7 + dayIdx);
+  const dt = computeScheduleDate(startStr, weekNum, dayIdx);
+  if (!dt) return '';
   const y = dt.getFullYear();
   const m = String(dt.getMonth() + 1).padStart(2, '0');
   const d = String(dt.getDate()).padStart(2, '0');
@@ -180,28 +184,26 @@ function parseClockMinutes(timeStr) {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
-function getLessonOrder(inst, getPeriodTimeFn) {
+function getLessonOrder(inst, getPeriodTimeFn, dayIdx) {
   if (inst.eventStartTime) {
     const mins = parseClockMinutes(inst.eventStartTime);
     if (mins !== null) return mins;
   }
   const period = Number(inst.period) || 1;
-  const periodTime = getPeriodTimeFn ? getPeriodTimeFn(period) : '';
-  const timeMins = parseClockMinutes(periodTime);
+  const time = getPeriodTimeFn ? getPeriodTimeFn(period, { groupId: inst.groupId, dayIndex: dayIdx, roomId: inst.roomId }) : '';
+  const timeMins = parseClockMinutes(time);
   return timeMins !== null ? timeMins : period * 100;
 }
 
 const lessonsByDay = computed(() => {
   const map = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [] };
-  const getOrder = (inst) => getLessonOrder(inst, props.getPeriodTime);
   safeInstances.value.forEach(inst => {
     const d = Number(inst.day !== undefined ? inst.day : inst.blockIndex);
-    if (map[d]) {
-      map[d].push(inst);
-    }
+    if (map[d]) map[d].push(inst);
   });
   Object.keys(map).forEach(key => {
-    map[key].sort((a, b) => getOrder(a) - getOrder(b));
+    const dayIdx = Number(key);
+    map[key].sort((a, b) => getLessonOrder(a, props.getPeriodTime, dayIdx) - getLessonOrder(b, props.getPeriodTime, dayIdx));
   });
   return map;
 });

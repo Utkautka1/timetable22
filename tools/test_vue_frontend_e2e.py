@@ -226,7 +226,42 @@ class TestVueFrontendE2E(unittest.TestCase):
         with open(sched_data_path, "r", encoding="utf-8") as f:
             code = f.read()
             self.assertIn("canonicalPublicInstId", code)
-            self.assertIn("sub.date && dateISO && String(sub.date) !== String(dateISO)", code)
+            self.assertIn("!dateISO", code)
+            self.assertIn("String(sub.date) !== String(dateISO)", code)
+
+    def test_19_browser_history_push_state_and_popstate_guard(self):
+        """Проверяет pushState на пользовательских переходах и защиту от гонки при popstate."""
+        app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "App.vue"))
+        with open(app_path, "r", encoding="utf-8") as f:
+            code = f.read()
+            self.assertIn("isPopStateNavigating", code)
+            self.assertIn("mode: 'push'", code)
+            self.assertIn("handlePopState", code)
+
+    def test_20_teacher_search_yo_normalization_and_unassigned_fallback(self):
+        """Проверяет нормализацию буквы 'ё' и устойчивость к нераспознанным ЦК."""
+        picker_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "components", "public", "TeacherRoomPicker.vue"))
+        with open(picker_path, "r", encoding="utf-8") as f:
+            code = f.read()
+            self.assertIn("/ё/g, 'е'", code)
+            self.assertIn("'unassigned'", code)
+
+    def test_21_safe_local_date_computation_in_schedule_viewer(self):
+        """Проверяет вычисление календарных дат без смещения по часовым поясам."""
+        viewer_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "components", "public", "ScheduleViewer.vue"))
+        with open(viewer_path, "r", encoding="utf-8") as f:
+            code = f.read()
+            self.assertIn("computeScheduleDate", code)
+            self.assertIn(":dateISO=\"dayObj.dateISO\"", code)
+
+    def test_22_cancelled_lessons_hide_room_chip(self):
+        """Проверяет скрытие аудитории для отмененных занятий и поддержку всех типов отмен."""
+        card_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "components", "public", "LessonCard.vue"))
+        with open(card_path, "r", encoding="utf-8") as f:
+            code = f.read()
+            self.assertIn("!isCancelled", code)
+            self.assertIn("pending_move", code)
+            self.assertIn("moved", code)
 
 if __name__ == "__main__":
     unittest.main()

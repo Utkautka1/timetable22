@@ -242,11 +242,11 @@ function disposeThreeObject(obj) {
   if (!obj) return;
   if (obj.geometry) obj.geometry.dispose();
   if (obj.material) {
-    if (Array.isArray(obj.material)) {
-      obj.material.forEach(m => m.dispose());
-    } else {
-      obj.material.dispose();
-    }
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(m => {
+      if (m.map) m.map.dispose();
+      m.dispose();
+    });
   }
 }
 
@@ -261,8 +261,11 @@ function cleanupWebGL() {
   }
   if (renderer) {
     renderer.dispose();
-    renderer.forceContextLoss?.();
+    renderer = null;
   }
+  scene = null;
+  camera = null;
+  isVisible = false;
 }
 
 onMounted(() => {

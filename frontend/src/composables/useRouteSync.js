@@ -2,7 +2,7 @@
  * Синхронизация маршрутов и сохранения состояния расписания:
  * чтение URL-параметров (path, search, hash), localStorage,
  * поддержка формата /specialty/:specId/year/:year/group/:groupId
- * и актуализация browser history без перезагрузки страницы.
+ * и управление историей браузера (pushState vs replaceState).
  */
 
 const STORAGE_KEY = 'timetable_public_selection';
@@ -31,18 +31,23 @@ function findEntityInParts(parts) {
   return null;
 }
 
-function parseUrlPath(pathname) {
+export function parseUrlPath(pathname) {
   const parts = (pathname || '').split('/').filter(Boolean);
   return findEntityInParts(parts);
 }
 
-function parseUrlHash(hash) {
-  const clean = (hash || '').replace(/^#\/?/, '');
-  const parts = clean.split('/').filter(Boolean);
+export function parseUrlHash(hash) {
+  if (!hash) return null;
+  const [cleanHash] = hash.replace(/^#\/?/, '').split('?');
+  const hyphenMatch = cleanHash.match(/^(group|teacher|room)-([a-zA-Z0-9_-]+)$/);
+  if (hyphenMatch) {
+    return { kind: hyphenMatch[1], id: safeDecode(hyphenMatch[2]) };
+  }
+  const parts = cleanHash.split('/').filter(Boolean);
   return findEntityInParts(parts);
 }
 
-function parseUrlSearch(search) {
+export function parseUrlSearch(search) {
   const params = new URLSearchParams(search || '');
   const week = params.get('week') ? Number(params.get('week')) : null;
   if (params.get('group')) return { kind: 'group', id: safeDecode(params.get('group')), week };
@@ -54,6 +59,13 @@ function parseUrlSearch(search) {
   return { week };
 }
 
+function extractHashWeek() {
+  if (typeof window === 'undefined' || !window.location.hash?.includes('?')) return null;
+  const qs = window.location.hash.split('?')[1];
+  const w = new URLSearchParams(qs).get('week');
+  return w ? Number(w) : null;
+}
+
 export function parseCurrentRoute() {
   if (typeof window === 'undefined') return { kind: 'group', id: '', week: null };
   const fromPath = parseUrlPath(window.location.pathname);
@@ -63,15 +75,14 @@ export function parseCurrentRoute() {
   return {
     kind: entity?.kind || 'group',
     id: entity?.id || '',
-    week: fromSearch.week
+    week: fromSearch.week || extractHashWeek()
   };
 }
 
 export function readSavedSelection() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
@@ -79,17 +90,20 @@ export function readSavedSelection() {
 
 export function saveSelection(kind, id, week) {
   try {
-    if (!id) {
-      localStorage.removeItem(STORAGE_KEY);
-      return;
-    }
+    if (!id) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ kind, id, week }));
   } catch (err) {
     console.warn('Не удалось сохранить выбор расписания:', err);
   }
 }
 
-function entityExists(data, kind, id) {
+export function clearSavedSelection() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {}
+}
+
+export function entityExists(data, kind, id) {
   if (!id || !data) return false;
   const list = kind === 'teacher' ? data.teachers : (kind === 'room' ? data.rooms : data.groups);
   return Array.isArray(list) && list.some(item => String(item.id) === String(id));
@@ -108,12 +122,14 @@ function resolveFallbackWeek(data, requestedWeek) {
 export function resolveInitialSelection(data) {
   const route = parseCurrentRoute();
   const saved = readSavedSelection();
-
   let targetKind = route.id ? route.kind : (saved?.id ? saved.kind : 'group');
   let targetId = route.id || saved?.id || '';
   let targetWeek = route.week || saved?.week || null;
 
-  if (targetId && !entityExists(data, targetKind, targetId)) {
+  if (route.id && !entityExists(data, route.kind, route.id)) {
+    targetId = saved?.id && entityExists(data, saved.kind, saved.id) ? saved.id : '';
+    targetKind = targetId ? (saved?.kind || 'group') : 'group';
+  } else if (targetId && !entityExists(data, targetKind, targetId)) {
     targetId = '';
   }
 
@@ -122,8 +138,8 @@ export function resolveInitialSelection(data) {
 }
 
 function buildGroupUrl(group) {
-  if (group && group.specialtyId && group.admissionYear) {
-    const spec = encodeURIComponent(String(group.specialtyId));
+  if (group && group.admissionYear) {
+    const spec = group.specialtyId ? encodeURIComponent(String(group.specialtyId)) : 'none';
     const yr = encodeURIComponent(String(group.admissionYear));
     const gid = encodeURIComponent(String(group.id));
     return `/specialty/${spec}/year/${yr}/group/${gid}`;
@@ -131,11 +147,14 @@ function buildGroupUrl(group) {
   return `/group/${encodeURIComponent(String(group?.id || ''))}`;
 }
 
-export function syncBrowserUrl(kind, id, week, groupsList = []) {
-  if (typeof window === 'undefined') return;
-  if (window.location.pathname.startsWith('/admin')) return;
+export function syncBrowserUrl(kind, id, week, groupsList = [], opts = {}) {
+  if (typeof window === 'undefined' || window.location.pathname.startsWith('/admin')) return;
+  const mode = opts.mode || 'replace';
   if (!id) {
-    if (window.location.pathname !== '/') window.history.replaceState(null, '', '/');
+    if (window.location.pathname !== '/') {
+      const fn = mode === 'push' ? window.history.pushState : window.history.replaceState;
+      fn.call(window.history, null, '', '/');
+    }
     return;
   }
   let basePath = `/${kind}/${encodeURIComponent(String(id))}`;
@@ -143,9 +162,9 @@ export function syncBrowserUrl(kind, id, week, groupsList = []) {
     const found = groupsList.find(g => String(g.id) === String(id));
     if (found) basePath = buildGroupUrl(found);
   }
-  const search = week ? `?week=${week}` : '';
-  const newUrl = `${basePath}${search}`;
+  const newUrl = `${basePath}${week ? `?week=${week}` : ''}`;
   if (window.location.pathname + window.location.search !== newUrl) {
-    window.history.replaceState(null, '', newUrl);
+    const fn = mode === 'push' ? window.history.pushState : window.history.replaceState;
+    fn.call(window.history, null, '', newUrl);
   }
 }

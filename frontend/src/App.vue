@@ -137,7 +137,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import Navbar from './components/common/Navbar.vue';
 import AppFooter from './components/common/AppFooter.vue';
 import Modal from './components/common/Modal.vue';
@@ -155,12 +155,13 @@ import { useScheduleData } from './composables/useScheduleData.js';
 import { useCurrentTime } from './composables/useCurrentTime.js';
 import { useAuth } from './composables/useAuth.js';
 import { useScheduleExport } from './composables/useScheduleExport.js';
-import { parseCurrentRoute } from './composables/useRouteSync.js';
+import { parseCurrentRoute, entityExists, clearSavedSelection } from './composables/useRouteSync.js';
 
 const isBellsOpen = ref(false);
 const isSubsOpen = ref(false);
 const isAuthModalOpen = ref(false);
 const isAdminMode = ref(false);
+const isPopStateNavigating = ref(false);
 
 const { exportScheduleCSV, printSchedule } = useScheduleExport();
 
@@ -224,32 +225,34 @@ function handleResetView() {
   selectedKind.value = 'group';
   selectedId.value = '';
   isAdminMode.value = false;
-  saveSelection('group', '', selectedWeek.value);
-  syncBrowserUrl('group', '', selectedWeek.value, groups.value);
+  clearSavedSelection();
+  syncBrowserUrl('group', '', selectedWeek.value, groups.value, { mode: 'push' });
 }
 
 // 4. Переключение роли (Студент / Преподаватель / Аудитории)
 function handleSelectRole(role) {
   selectedKind.value = role;
   selectedId.value = '';
-  syncBrowserUrl(role, '', selectedWeek.value, groups.value);
+  syncBrowserUrl(role, '', selectedWeek.value, groups.value, { mode: 'push' });
 }
 
 // 5. Выбор студенческой группы через Drill-Down
 function handleSelectGroup(groupId) {
   selectedKind.value = 'group';
   selectedId.value = groupId;
+  syncBrowserUrl('group', groupId, selectedWeek.value, groups.value, { mode: 'push' });
 }
 
 // 6. Выбор преподавателя или кабинета
 function handleSelectEntity(entityId) {
   selectedId.value = entityId;
+  syncBrowserUrl(selectedKind.value, entityId, selectedWeek.value, groups.value, { mode: 'push' });
 }
 
 // 7. Смена сущности (возврат к пошаговому выбору)
 function handleChangeSelection() {
   selectedId.value = '';
-  syncBrowserUrl(selectedKind.value, '', selectedWeek.value, groups.value);
+  syncBrowserUrl(selectedKind.value, '', selectedWeek.value, groups.value, { mode: 'push' });
 }
 
 // 8. Переход к расписанию преподавателя из карточки пары
@@ -257,6 +260,7 @@ function handleSelectTeacher(teacherId) {
   if (!teacherId) return;
   selectedKind.value = 'teacher';
   selectedId.value = teacherId;
+  syncBrowserUrl('teacher', teacherId, selectedWeek.value, groups.value, { mode: 'push' });
 }
 
 // 9. Открытие панели администратора
@@ -279,18 +283,33 @@ function handlePrint() {
   printSchedule();
 }
 
-// 13. Обработка навигации в истории браузера
-function handlePopState() {
-  const route = parseCurrentRoute();
-  selectedKind.value = route.kind || 'group';
-  selectedId.value = route.id || '';
-  if (route.week) selectedWeek.value = route.week;
+// 13. Обработка навигации в истории браузера (popstate)
+async function handlePopState() {
+  isPopStateNavigating.value = true;
+  try {
+    const route = parseCurrentRoute();
+    const data = indexData.value?.data;
+    if (route.id && data && !entityExists(data, route.kind, route.id)) {
+      selectedKind.value = 'group';
+      selectedId.value = '';
+      syncBrowserUrl('group', '', selectedWeek.value, groups.value, { mode: 'replace' });
+      return;
+    }
+    selectedKind.value = route.kind || 'group';
+    selectedId.value = route.id || '';
+    if (route.week) selectedWeek.value = route.week;
+  } finally {
+    await nextTick();
+    isPopStateNavigating.value = false;
+  }
 }
 
 // Синхронизация URL и загрузка шарда при изменении сущности
 watch([selectedKind, selectedId, selectedWeek], () => {
   saveSelection(selectedKind.value, selectedId.value, selectedWeek.value);
-  syncBrowserUrl(selectedKind.value, selectedId.value, selectedWeek.value, groups.value);
+  if (!isPopStateNavigating.value) {
+    syncBrowserUrl(selectedKind.value, selectedId.value, selectedWeek.value, groups.value, { mode: 'replace' });
+  }
   updateDocumentTitle();
   if (selectedId.value) {
     loadScheduleShard(selectedKind.value, selectedId.value, selectedWeek.value);

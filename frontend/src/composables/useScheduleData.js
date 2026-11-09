@@ -24,15 +24,16 @@ function normalizeScheduleData(schedule) {
   return { ...schedule, instances, rawInstances };
 }
 
+const DEFAULT_TIMES = ['08:30–10:00', '10:10–11:40', '11:50–13:20', '14:00–15:30', '15:40–17:10', '17:20–18:50', '19:00–20:30'];
+
 function canonicalPublicInstId(value) {
   let id = String(value || '');
-  while (/__PUBW\d+$/i.test(id)) id = id.replace(/__PUBW\d+$/i, '');
-  return id;
+  return id.replace(/__(PUBW\d+|EXACT_W\d+|TRANSFER_[A-Za-z0-9_]+|CANONICAL_RECOVER_[A-Za-z0-9_]+|REMOTE_ONE_[A-Za-z0-9_]+)+$/gi, '');
 }
 
 function matchSubWithLesson(sub, inst, dateISO) {
-  if (!sub || !inst) return false;
-  if (sub.date && dateISO && String(sub.date) !== String(dateISO)) return false;
+  if (!sub || !inst || !dateISO) return false;
+  if (sub.date && String(sub.date) !== String(dateISO)) return false;
   const subIds = [sub.instId, sub.sourceInstId, sub.originalInstId]
     .map(canonicalPublicInstId)
     .filter(Boolean);
@@ -41,6 +42,20 @@ function matchSubWithLesson(sub, inst, dateISO) {
     .map(canonicalPublicInstId)
     .filter(Boolean);
   return instIds.some(id => subIds.includes(id));
+}
+
+function resolveParity(cfg, weekNum) {
+  const num = Number(weekNum);
+  if (!num) return null;
+  return cfg?.weekParityOverrides?.[String(num)] || (num % 2 === 1 ? 'odd' : 'even');
+}
+
+function resolveGroupCustomTime(g, dayIndex, idx, parity) {
+  if (!g || dayIndex === null || dayIndex === undefined) return '';
+  const pCustom = parity ? g.dayPeriodTimesByParity?.[parity]?.[String(dayIndex)] : null;
+  if (Array.isArray(pCustom) && pCustom[idx]?.trim()) return pCustom[idx];
+  const dCustom = g.dayPeriodTimes?.[String(dayIndex)] || g.dayPeriodTimes?.[dayIndex];
+  return (Array.isArray(dCustom) && dCustom[idx]?.trim()) ? dCustom[idx] : '';
 }
 
 export function useScheduleData() {
@@ -162,16 +177,19 @@ export function useScheduleData() {
 
   function getPeriodTime(periodNumber, opts = {}) {
     const idx = Number(periodNumber) - 1;
-    const { groupId, dayIndex } = opts;
-    if (groupId && dayIndex !== null && dayIndex !== undefined) {
-      const g = groups.value.find(item => String(item.id) === String(groupId));
-      const custom = g?.dayPeriodTimes?.[String(dayIndex)] || g?.dayPeriodTimes?.[dayIndex];
-      if (Array.isArray(custom) && custom[idx]) return custom[idx];
+    const { groupId, dayIndex, dateStr, roomId, weekNum } = opts;
+    const cfg = semesterConfig.value || {};
+    if (dateStr && (cfg.shortenedDates || []).includes(dateStr) && cfg.shortenedPeriodTimes?.[idx]) {
+      return cfg.shortenedPeriodTimes[idx];
     }
-    const times = semesterConfig.value?.periodTimes || [];
-    if (times[idx]) return times[idx];
-    const defaults = ['08:30–10:00', '10:10–11:40', '11:50–13:20', '14:00–15:30', '15:40–17:10', '17:20–18:50', '19:00–20:30'];
-    return defaults[idx] || '';
+    const g = groupId ? groups.value.find(item => String(item.id) === String(groupId)) : null;
+    const parity = resolveParity(cfg, weekNum || selectedWeek.value);
+    const custom = resolveGroupCustomTime(g, dayIndex, idx, parity);
+    if (custom) return custom;
+    if (roomId && getRoomLocation(roomId).includes('Вознесенский') && cfg.voznesenskyPeriodTimes?.[idx]) {
+      return cfg.voznesenskyPeriodTimes[idx];
+    }
+    return cfg.periodTimes?.[idx] || DEFAULT_TIMES[idx] || '';
   }
 
   function findSubstitutionForLesson(instance, dateISO) {

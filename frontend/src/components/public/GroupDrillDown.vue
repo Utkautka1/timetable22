@@ -187,8 +187,8 @@ const availableGroups = computed(() => {
   return props.groups
     .filter(g => {
       const matchSpec = (g.specialtyId || '') === (chosenSpecialtyId.value || '');
-      const matchYear = Number(g.admissionYear) === Number(chosenYear.value);
-      return matchSpec && matchYear;
+      if (chosenYear.value === null) return matchSpec;
+      return matchSpec && Number(g.admissionYear) === Number(chosenYear.value);
     })
     .sort((a, b) => a.name.localeCompare(b.name, 'ru', { numeric: true }));
 });
@@ -210,7 +210,12 @@ const stepSubtitle = computed(() => {
 // 11. Выбор специальности
 function selectSpecialty(specId) {
   chosenSpecialtyId.value = specId;
-  step.value = 'year';
+  if (!availableYears.value.length) {
+    chosenYear.value = null;
+    step.value = 'group';
+  } else {
+    step.value = 'year';
+  }
 }
 
 // 12. Выбор года

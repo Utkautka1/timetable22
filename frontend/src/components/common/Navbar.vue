@@ -337,6 +337,14 @@ function handleSubsClick() {
   .app-navbar {
     padding: 8px 12px;
   }
+  .nav-left {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .role-selector {
+    width: 100%;
+  }
   .brand-sub {
     display: none;
   }

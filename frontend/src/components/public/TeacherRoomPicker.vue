@@ -213,7 +213,7 @@ const availableDepartments = computed(() => {
   if (props.role !== 'teacher') return [];
   const counts = new Map();
   props.items.forEach(t => {
-    const dId = String(t.departmentId || 'unassigned');
+    const dId = (t.departmentId && deptNameMap.value.has(String(t.departmentId))) ? String(t.departmentId) : 'unassigned';
     counts.set(dId, (counts.get(dId) || 0) + 1);
   });
   const list = [];
@@ -232,29 +232,32 @@ const availableLetters = computed(() => {
   if (props.role !== 'teacher') return [];
   const set = new Set();
   props.items.forEach(t => {
-    const first = (t.name || '').trim().charAt(0).toUpperCase();
-    if (first && /[А-ЯЁ]/.test(first)) set.add(first);
+    let first = (t.name || '').trim().charAt(0).toUpperCase();
+    if (first === 'Ё') first = 'Е';
+    if (first && /[А-Я]/.test(first)) set.add(first);
   });
   return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
 });
 
 function matchTeacherQuery(t, query) {
   if (!query) return true;
-  const q = query.toLowerCase().trim();
-  const name = (t.name || '').toLowerCase();
-  const prof = (t.profile || '').toLowerCase();
+  const q = query.toLowerCase().replace(/ё/g, 'е').trim();
+  const name = (t.name || '').toLowerCase().replace(/ё/g, 'е');
+  const prof = (t.profile || '').toLowerCase().replace(/ё/g, 'е');
   return name.includes(q) || prof.includes(q);
 }
 
 function matchTeacherLetter(t, letter) {
   if (!letter) return true;
-  return (t.name || '').trim().toUpperCase().startsWith(letter);
+  let first = (t.name || '').trim().charAt(0).toUpperCase();
+  if (first === 'Ё') first = 'Е';
+  return first === letter;
 }
 
 function matchTeacherDept(t, deptId) {
   if (!deptId) return true;
-  if (deptId === 'unassigned') return !t.departmentId;
-  return String(t.departmentId) === String(deptId);
+  const tDept = (t.departmentId && deptNameMap.value.has(String(t.departmentId))) ? String(t.departmentId) : 'unassigned';
+  return tDept === String(deptId);
 }
 
 const filteredTeachers = computed(() => {
@@ -297,10 +300,10 @@ const campusGroups = computed(() => {
   const sadovayaRooms = [];
 
   props.items.forEach(r => {
-    const name = String(r.name || '');
-    if (r.isExternal || name.startsWith('В-') || name.startsWith('Возн')) {
+    const name = String(r.name || '').toLowerCase();
+    if (r.isExternal || name.startsWith('в-') || name.includes('возн')) {
       voznesenskyRooms.push(r);
-    } else if (name.startsWith('С-') || name.startsWith('Сад')) {
+    } else if (name.startsWith('с-') || name.includes('садов')) {
       sadovayaRooms.push(r);
     } else {
       mainRooms.push(r);
@@ -431,13 +434,26 @@ const campusGroups = computed(() => {
 
 .clear-search-btn {
   position: absolute;
-  right: 12px;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
   background: none;
   border: none;
   color: var(--ink-muted);
-  font-size: 14px;
+  font-size: 16px;
   cursor: pointer;
-  padding: 4px;
+  padding: 8px;
+  min-width: 36px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 768px) {
+  .teacher-search-input {
+    font-size: 16px;
+  }
 }
 
 .dept-tabs-scroll {

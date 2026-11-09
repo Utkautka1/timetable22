@@ -35,7 +35,10 @@
             <span class="change-value">{{ getSubjectName(sub.newSubjectId) }}</span>
           </div>
 
-          <div v-if="sub.note" class="sub-note-text">
+          <div v-if="sub.type === 'cancel' && !sub.note" class="sub-note-text cancel-note">
+            Занятие отменено
+          </div>
+          <div v-else-if="sub.note" class="sub-note-text">
             {{ sub.note }}
           </div>
         </div>
