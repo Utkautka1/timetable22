@@ -157,15 +157,39 @@ function resolveRoomSizeLabel(sizeObj, capacity = 0) {
   return '';
 }
 
+function resolveMeaningfulTypeLabel(cats, typeObj) {
+  if (cats.isArt) return 'художественная';
+  if (cats.isComputer) return 'компьютерная';
+  if (cats.isLab) return 'лаборатория';
+  if (cats.isGym) return 'спортзал';
+  const name = String(typeObj?.name || '').trim();
+  const lower = name.toLowerCase();
+  if (!name || ['обычная', 'стандартная', 'аудитория', 'кабинет', 'лекционная'].some(w => lower.includes(w))) {
+    return '';
+  }
+  return name;
+}
+
+function buildRoomTagLabel(sizeLabel, typeLabel, isSpecial, capacity) {
+  const parts = [];
+  if (sizeLabel && (isSpecial || sizeLabel === 'большая')) {
+    parts.push(sizeLabel);
+  }
+  if (typeLabel) {
+    parts.push(typeLabel);
+  }
+  return parts.join(' · ') || (capacity >= 40 ? `${capacity} мест` : '');
+}
+
 export function getRoomCategoryDetails(room, roomTypes = [], roomSizes = []) {
   if (!room) return { tagLabel: '', description: '', isArt: false, isComputer: false, isLab: false };
   const typeObj = (roomTypes || []).find(t => String(t.id) === String(room.typeId));
   const sizeObj = (roomSizes || []).find(s => String(s.id) === String(room.sizeId));
   const cats = resolveRoomTypeCategory(room, typeObj);
   const sizeLabel = resolveRoomSizeLabel(sizeObj, room.capacity || 0);
-  const typeLabel = cats.isArt ? 'художественная' : (cats.isComputer ? 'компьютерная' : (cats.isLab ? 'лаборатория' : (cats.isGym ? 'спортзал' : (typeObj?.name || ''))));
-  const tagParts = [sizeLabel, typeLabel].filter(Boolean);
-  const tagLabel = tagParts.join(' · ') || (room.capacity ? `${room.capacity} мест` : '');
+  const typeLabel = resolveMeaningfulTypeLabel(cats, typeObj);
+  const isSpecial = cats.isArt || cats.isComputer || cats.isLab || cats.isGym || Boolean(typeLabel);
+  const tagLabel = buildRoomTagLabel(sizeLabel, typeLabel, isSpecial, room.capacity || 0);
   const mainTypeTitle = typeObj?.name || (cats.isArt ? 'Художественный кабинет' : (cats.isComputer ? 'Компьютерный класс' : 'Аудитория'));
   const sizeDesc = sizeLabel ? `${sizeLabel} (${room.capacity || 0} мест)` : (room.capacity ? `${room.capacity} мест` : '');
   const descParts = [mainTypeTitle, sizeDesc, room.equipment].filter(Boolean);

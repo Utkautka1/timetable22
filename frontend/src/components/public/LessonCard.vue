@@ -63,7 +63,7 @@
         {{ displaySubjectTitle }}
         <span v-if="subgroupBadge" class="subgroup-inline"> ({{ subgroupBadge }})</span>
         <span v-if="weekNumbersText" class="week-numbers-inline"> · {{ weekNumbersText }}</span>
-        <span v-if="isStream" class="stream-inline"> · 🔗 поток</span>
+        <span v-if="isStream && effectiveGroups.length <= 1" class="stream-inline"> · 🔗 поток</span>
       </h4>
 
       <!-- Строка пояснения переноса / деталей изменений -->
@@ -820,7 +820,8 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 6px 10px;
   margin-top: 4px;
   width: 100%;
   min-width: 0;
@@ -830,8 +831,8 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   display: flex;
   align-items: center;
   gap: 6px;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 120px;
   overflow: hidden;
 }
 
@@ -882,8 +883,8 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 120px;
   flex-wrap: wrap;
 }
 
@@ -893,11 +894,8 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   gap: 6px;
   font-size: 12px;
   color: var(--ink-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 auto;
+  min-width: 120px;
 }
 
 .teacher-btn {
@@ -909,17 +907,16 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   text-align: left;
   border-radius: 4px;
   transition: opacity 0.15s ease;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 120px;
 }
 
 .teacher-name {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
+  display: inline-block;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
+  line-height: 1.25;
 }
 
 .teacher-btn:hover .teacher-name {
@@ -952,6 +949,7 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   color: var(--blue-700);
   white-space: nowrap;
   flex-shrink: 0;
+  margin-left: auto;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 

@@ -347,7 +347,7 @@ PUBLIC_SHARD_CACHE_MAX = int(os.environ.get("PUBLIC_SHARD_CACHE_MAX", "16"))
 # v1870: shard schema is independent from the publication marker. A deploy that
 # fixes shard selection must be able to rebuild lazy public files from the SAME
 # publishedSnapshot without forcing staff to republish the timetable.
-PUBLIC_SHARD_SCHEMA_VERSION = 1894
+PUBLIC_SHARD_SCHEMA_VERSION = 1895
 PUBLIC_INDEX_SCHEMA_VERSION = 1871
 
 
@@ -1181,71 +1181,98 @@ def _trim_instance_to_public_weeks(project, inst):
     return out
 
 
+def _public_sub_direct_matches(sub, kind, entity_id):
+    """Direct identity matching from substitution fields."""
+    eid = str(entity_id or "")
+    if not eid or not isinstance(sub, dict):
+        return False
+    if kind == "group":
+        return eid in {str(sub.get("groupId") or ""), str(sub.get("importGroupId") or "")}
+    if kind == "teacher":
+        return eid in {
+            str(sub.get("newTeacherId") or ""), str(sub.get("teacherId") or ""),
+            str(sub.get("importOldTeacherId") or ""), str(sub.get("importNewTeacherId") or "")
+        }
+    if kind == "room":
+        return eid in {
+            str(sub.get("newRoomId") or ""), str(sub.get("roomId") or ""),
+            str(sub.get("importNewRoom") or ""), str(sub.get("importOldRoom") or "")
+        }
+    return False
+
+
+def _public_sub_instance_matches(project, sub, kind, entity_id, loads_by_id, inst_by_id, inst_by_can, assignment):
+    """Instance identity matching by dereferencing substitution instId."""
+    eid = str(entity_id or "")
+    if not eid or not isinstance(sub, dict):
+        return False
+    sid = str(sub.get("instId") or sub.get("sourceInstId") or sub.get("originalInstId") or "")
+    inst = inst_by_id.get(sid) or inst_by_can.get(_canonical_public_inst_id(sid))
+    if not isinstance(inst, dict):
+        return False
+    if kind == "group":
+        return eid in _instance_group_ids(inst)
+    if kind == "teacher":
+        return eid in _public_instance_teacher_ids(project, inst, loads_by_id)
+    if kind == "room":
+        iid = str(inst.get("instId") or "")
+        a = assignment.get(iid) if isinstance(assignment, dict) else {}
+        rids = {str(inst.get("roomId") or ""), str(inst.get("dedicatedRoomId") or ""), str(a.get("roomId") or "")} - {""}
+        return eid in rids
+    return False
+
+
+def _public_substitution_matches_entity(project, sub, kind, entity_id, loads_by_id, inst_by_id, inst_by_can, assignment):
+    """Checks whether a substitution belongs to a group, teacher, or room."""
+    if _public_sub_direct_matches(sub, kind, entity_id):
+        return True
+    return _public_sub_instance_matches(project, sub, kind, entity_id, loads_by_id, inst_by_id, inst_by_can, assignment)
+
+
+def _collect_entity_sub_support_ids(project, kind, entity_id, loads_by_id, inst_by_id, inst_by_can, assignment):
+    """Collects source instance IDs for all substitutions touching this entity."""
+    support_ids = set()
+    for sub in (project.get("substitutions") or []):
+        if not isinstance(sub, dict):
+            continue
+        if _public_substitution_matches_entity(project, sub, kind, entity_id, loads_by_id, inst_by_id, inst_by_can, assignment):
+            support_ids.update(_public_substitution_source_ids(sub))
+    return support_ids
+
+
+def _filter_raw_instances(project, instances, kind, entity_id, loads_by_id, assignment, extra_support_ids):
+    """Selects raw instances belonging directly to entity or required as substitution support."""
+    chosen = []
+    for inst in instances:
+        if not isinstance(inst, dict):
+            continue
+        is_support = bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))
+        if is_support:
+            chosen.append(inst)
+            continue
+        if kind == "group" and entity_id in _instance_group_ids(inst):
+            chosen.append(inst)
+        elif kind == "teacher" and entity_id in _public_instance_teacher_ids(project, inst, loads_by_id):
+            chosen.append(inst)
+        elif kind == "room":
+            iid = str(inst.get("instId") or "")
+            a = assignment.get(iid) if iid else {}
+            rids = {str(inst.get("roomId") or ""), str(inst.get("dedicatedRoomId") or ""), str(a.get("roomId") or "")} - {""}
+            if entity_id in rids:
+                chosen.append(inst)
+    return chosen
+
+
 def _build_public_schedule_shard(project, kind, entity_id):
     schedule = project.get("schedule") if isinstance(project.get("schedule"), dict) else {}
     instances = schedule.get("instances") if isinstance(schedule.get("instances"), list) else []
     entity_id = str(entity_id or "")
-    loads_by_id = {
-        str(row.get("id") or row.get("loadId") or ""): row
-        for row in (project.get("loads") or [])
-        if isinstance(row, dict) and str(row.get("id") or row.get("loadId") or "")
-    }
-    extra_support_ids = set()
-    if kind == "group":
-        incoming_subs = [
-            sub for sub in (project.get("substitutions") or [])
-            if isinstance(sub, dict) and (str(sub.get("groupId") or "") == entity_id or str(sub.get("importGroupId") or "") == entity_id)
-        ]
-        for sub in incoming_subs:
-            extra_support_ids.update(_public_substitution_source_ids(sub))
-        raw_chosen = [
-            inst for inst in instances
-            if entity_id in _instance_group_ids(inst)
-            or bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))
-        ]
-    elif kind == "teacher":
-        incoming_subs = [
-            sub for sub in (project.get("substitutions") or [])
-            if isinstance(sub, dict) and (_substitution_targets_teacher(sub, entity_id) or str(sub.get("importOldTeacherId") or "") == entity_id)
-        ]
-        for sub in incoming_subs:
-            extra_support_ids.update(_public_substitution_source_ids(sub))
-        raw_chosen = [
-            inst for inst in instances
-            if entity_id in _public_instance_teacher_ids(project, inst, loads_by_id)
-            or bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))
-        ]
-    elif kind == "room":
-        assignment = schedule.get("assignment") if isinstance(schedule.get("assignment"), dict) else {}
-        for sub in (project.get("substitutions") or []):
-            if not isinstance(sub, dict):
-                continue
-            if str(sub.get("newRoomId") or "") == entity_id or str(sub.get("importNewRoom") or "") == entity_id or str(sub.get("importOldRoom") or "") == entity_id:
-                extra_support_ids.update(_public_substitution_source_ids(sub))
-        raw_chosen = []
-        for inst in instances:
-            if not isinstance(inst, dict):
-                continue
-            iid = str(inst.get("instId") or "")
-            a = assignment.get(iid) if iid else None
-            room_ids = set()
-            if isinstance(a, dict):
-                for key in ("roomId", "extraRoomId"):
-                    if a.get(key):
-                        room_ids.add(str(a.get(key)))
-                for key in ("roomIds", "additionalRoomIds", "extraRoomIds"):
-                    for item in (a.get(key) or []):
-                        if isinstance(item, dict):
-                            rid = item.get("roomId") or item.get("id")
-                        else:
-                            rid = item
-                        if rid:
-                            room_ids.add(str(rid))
-            if (entity_id in room_ids
-                or bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))):
-                raw_chosen.append(inst)
-    else:
-        raw_chosen = []
+    loads_by_id = {str(r.get("id") or r.get("loadId") or ""): r for r in (project.get("loads") or []) if isinstance(r, dict)}
+    inst_by_id = {str(i.get("instId")): i for i in instances if isinstance(i, dict) and i.get("instId")}
+    inst_by_can = {_canonical_public_inst_id(i.get("instId")): i for i in instances if isinstance(i, dict) and i.get("instId")}
+    assignment = schedule.get("assignment") if isinstance(schedule.get("assignment"), dict) else {}
+    extra_support_ids = _collect_entity_sub_support_ids(project, kind, entity_id, loads_by_id, inst_by_id, inst_by_can, assignment)
+    raw_chosen = _filter_raw_instances(project, instances, kind, entity_id, loads_by_id, assignment, extra_support_ids)
     chosen = []
     for inst in raw_chosen:
         is_support = bool(_public_instance_identity_ids(inst).intersection(extra_support_ids))
@@ -1258,10 +1285,7 @@ def _build_public_schedule_shard(project, kind, entity_id):
                 trimmed["teacherIds"] = list(dict.fromkeys(existing + sorted(resolved)))
             chosen.append(trimmed)
     ids = {str(inst.get("instId")) for inst in chosen if isinstance(inst, dict) and inst.get("instId")}
-    assignment = schedule.get("assignment") if isinstance(schedule.get("assignment"), dict) else {}
     locked = schedule.get("locked") or []
-    # Public rendering only consumes these schedule fields. Keep any harmless
-    # scalar metadata, but never ship other groups' instances/assignments.
     out = {k: v for k, v in schedule.items() if k not in {"instances", "assignment", "locked", "unplaced"}}
     out["instances"] = chosen
     out["assignment"] = {iid: assignment[iid] for iid in ids if iid in assignment}
@@ -1270,60 +1294,66 @@ def _build_public_schedule_shard(project, kind, entity_id):
     return out
 
 
+def _collect_patch_group_teacher_room_ids(chosen_instances, kind, entity_id):
+    """Collects all group, teacher, and room identities touched by chosen instances."""
+    gids = set([str(entity_id)]) if kind == "group" and entity_id else set()
+    tids = set([str(entity_id)]) if kind == "teacher" and entity_id else set()
+    rids = set([str(entity_id)]) if kind == "room" and entity_id else set()
+    lids = set()
+    for inst in chosen_instances:
+        if inst.get("loadId"):
+            lids.add(str(inst.get("loadId")))
+        gids.update(_instance_group_ids(inst))
+        if inst.get("teacherId"):
+            tids.add(str(inst.get("teacherId")))
+        if inst.get("roomId"):
+            rids.add(str(inst.get("roomId")))
+        if inst.get("dedicatedRoomId"):
+            rids.add(str(inst.get("dedicatedRoomId")))
+        for tid in (inst.get("teacherIds") or []):
+            if tid:
+                tids.add(str(tid))
+    return gids, tids, rids, lids
+
+
+def _sub_matches_patch_ids(row, gids, tids, rids):
+    """Checks if substitution directly references any group, teacher, or room id."""
+    if str(row.get("groupId") or "") in gids or str(row.get("importGroupId") or "") in gids:
+        return True
+    for k in ("teacherId", "newTeacherId", "importOldTeacherId", "importNewTeacherId"):
+        if str(row.get(k) or "") in tids:
+            return True
+    for k in ("roomId", "newRoomId", "importOldRoom", "importNewRoom"):
+        if str(row.get(k) or "") in rids:
+            return True
+    return False
+
 
 def _public_entity_data_patch(project, chosen_instances, kind=None, entity_id=None):
     """Only heavy dictionaries referenced by one public entity."""
-    chosen_instances = [x for x in (chosen_instances or []) if isinstance(x, dict)]
+    chosen = [x for x in (chosen_instances or []) if isinstance(x, dict)]
     inst_ids = set()
-    for inst in chosen_instances:
+    for inst in chosen:
         inst_ids.update(_public_instance_identity_ids(inst))
-    load_ids = set()
-    group_ids = set([str(entity_id)]) if kind == "group" and entity_id else set()
-    teacher_ids = set([str(entity_id)]) if kind == "teacher" and entity_id else set()
-    room_ids = set([str(entity_id)]) if kind == "room" and entity_id else set()
-    for inst in chosen_instances:
-        if inst.get("loadId"):
-            load_ids.add(str(inst.get("loadId")))
-        group_ids.update(_instance_group_ids(inst))
-        if inst.get("teacherId"):
-            teacher_ids.add(str(inst.get("teacherId")))
-        if inst.get("roomId"):
-            room_ids.add(str(inst.get("roomId")))
-        if inst.get("dedicatedRoomId"):
-            room_ids.add(str(inst.get("dedicatedRoomId")))
-        for tid in (inst.get("teacherIds") or []):
-            if tid:
-                teacher_ids.add(str(tid))
-        for part in (inst.get("streamParticipants") or []):
-            if isinstance(part, dict):
-                if part.get("loadId"):
-                    load_ids.add(str(part.get("loadId")))
-                if part.get("groupId"):
-                    group_ids.add(str(part.get("groupId")))
-                if part.get("teacherId"):
-                    teacher_ids.add(str(part.get("teacherId")))
-    loads = []
-    for row in (project.get("loads") or []):
+    gids, tids, rids, lids = _collect_patch_group_teacher_room_ids(chosen, kind, entity_id)
+    loads = [row for row in (project.get("loads") or []) if isinstance(row, dict) and (
+        str(row.get("id") or row.get("loadId") or "") in lids or str(row.get("groupId") or "") in gids or str(row.get("teacherId") or "") in tids
+    )]
+    schedule = project.get("schedule") if isinstance(project.get("schedule"), dict) else {}
+    instances = schedule.get("instances") if isinstance(schedule.get("instances"), list) else []
+    inst_by_id = {str(i.get("instId")): i for i in instances if isinstance(i, dict) and i.get("instId")}
+    inst_by_can = {_canonical_public_inst_id(i.get("instId")): i for i in instances if isinstance(i, dict) and i.get("instId")}
+    loads_by_id = {str(r.get("id") or r.get("loadId") or ""): r for r in loads}
+    assignment = schedule.get("assignment") if isinstance(schedule.get("assignment"), dict) else {}
+    substitutions = []
+    for row in (project.get("substitutions") or []):
         if not isinstance(row, dict):
             continue
-        rid = str(row.get("id") or row.get("loadId") or "")
-        if rid in load_ids or str(row.get("groupId") or "") in group_ids or str(row.get("teacherId") or "") in teacher_ids:
-            loads.append(row)
-    substitutions = [
-        row for row in (project.get("substitutions") or [])
-        if isinstance(row, dict) and (
-            bool(_public_substitution_source_ids(row).intersection(inst_ids))
-            or str(row.get("groupId") or "") in group_ids
-            or str(row.get("importGroupId") or "") in group_ids
-            or str(row.get("teacherId") or "") in teacher_ids
-            or str(row.get("newTeacherId") or "") in teacher_ids
-            or str(row.get("importOldTeacherId") or "") in teacher_ids
-            or str(row.get("roomId") or "") in room_ids
-            or str(row.get("newRoomId") or "") in room_ids
-            or str(row.get("importOldRoom") or "") in room_ids
-            or str(row.get("importNewRoom") or "") in room_ids
-        )
-    ]
+        m_entity = _public_substitution_matches_entity(project, row, kind, entity_id, loads_by_id, inst_by_id, inst_by_can, assignment)
+        m_inst = bool(_public_substitution_source_ids(row).intersection(inst_ids))
+        m_patch = _sub_matches_patch_ids(row, gids, tids, rids)
+        if m_entity or m_inst or m_patch:
+            substitutions.append(row)
     return {"loads": loads, "substitutions": substitutions}
 
 

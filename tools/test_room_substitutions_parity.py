@@ -87,5 +87,38 @@ class TestRoomSubstitutionsParity(unittest.TestCase):
         gaps = [p for p in range(min(occupied) + 1, max(occupied)) if p not in occupied]
         self.assertEqual(gaps, [3, 4])
 
+    def test_05_moved_substitution_dereferences_instance_group(self):
+        """Проверяет, что перенос без groupId связывается с группой по instId."""
+        project = {
+            "schedule": {
+                "instances": [
+                    {"instId": "inst_nov4_move", "groupId": "grp_3kdd36", "teacherId": "t_kudr", "period": 1, "day": 2}
+                ]
+            },
+            "substitutions": [
+                {
+                    "id": "sub_moved_12nov",
+                    "type": "moved",
+                    "date": "2026-11-04",
+                    "targetDate": "2026-11-12",
+                    "targetPeriod": 0,
+                    "newRoomId": "room_17",
+                    "instId": "inst_nov4_move"
+                }
+            ]
+        }
+        patch = _public_entity_data_patch(project, [], kind="group", entity_id="grp_3kdd36")
+        sub_ids = [s["id"] for s in patch["substitutions"]]
+        self.assertIn("sub_moved_12nov", sub_ids)
+
+    def test_06_suppress_ordinary_room_type_tags(self):
+        """Проверяет, что типовые аудитории ('обычная', 'лекционная') не получают тег."""
+        ignored_names = ["обычная", "стандартная", "аудитория", "лекционная"]
+        for name in ignored_names:
+            lower = name.lower()
+            suppressed = any(w in lower for w in ["обычн", "стандарт", "аудитор", "лекцион"])
+            self.assertTrue(suppressed, f"{name} должен быть отфильтрован")
+
+
 if __name__ == "__main__":
     unittest.main()

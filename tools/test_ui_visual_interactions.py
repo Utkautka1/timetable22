@@ -262,5 +262,25 @@ class TestUIVisualInteractions(unittest.TestCase):
         }""")
         self.assertIn("blur", blur_style)
 
+    def test_13_lesson_footer_flex_wrap_and_teacher_layout(self):
+        """Проверяет flex-wrap в lesson-footer и перенос длинных имен педагогов."""
+        self.select_first_group(width=375, height=667)
+        footer = self.page.locator(".lesson-footer").first
+        if footer.count() > 0:
+            wrap = footer.evaluate("el => window.getComputedStyle(el).flexWrap")
+            self.assertEqual(wrap, "wrap", "В lesson-footer должен быть flex-wrap: wrap для предотвращения сжатия ФИО")
+
+    def test_14_no_redundant_stream_inline_when_badge_present(self):
+        """Проверяет отсутствие задвоения бейджа 'Поток' и инлайн-текста '· 🔗 поток'."""
+        self.select_first_group(width=1280, height=800)
+        cards = self.page.locator(".lesson-item")
+        for i in range(min(5, cards.count())):
+            card = cards.nth(i)
+            has_badge = card.locator(".stream-badge").count() > 0
+            if has_badge:
+                has_inline = card.locator(".stream-inline").count() > 0
+                self.assertFalse(has_inline, "При наличии бейджа 'Поток' инлайн '· 🔗 поток' не должен дублироваться")
+
+
 if __name__ == "__main__":
     unittest.main()
