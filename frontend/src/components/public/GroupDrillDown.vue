@@ -29,7 +29,7 @@
           </button>
         </template>
 
-        <template v-if="step === 'group'">
+        <template v-if="step === 'group' && chosenYear">
           <span class="crumb-separator">/</span>
           <span class="crumb-current">{{ chosenYear }} год</span>
         </template>
@@ -45,7 +45,12 @@
         v-for="sp in activeSpecialties" 
         :key="sp.id"
         class="drill-card specialty-card"
+        role="button"
+        tabindex="0"
+        :aria-label="`Специальность ${parseSpecialtyTitle(sp.name)}, ${sp.groupCount} групп`"
         @click="selectSpecialty(sp.id)"
+        @keydown.enter="selectSpecialty(sp.id)"
+        @keydown.space.prevent="selectSpecialty(sp.id)"
       >
         <div class="card-top">
           <span v-if="parseSpecialtyCode(sp.name)" class="specialty-code-badge">
@@ -63,7 +68,12 @@
       <div 
         v-if="unassignedCount > 0"
         class="drill-card specialty-card unassigned"
+        role="button"
+        tabindex="0"
+        aria-label="Группы без привязки к специальности"
         @click="selectSpecialty('')"
+        @keydown.enter="selectSpecialty('')"
+        @keydown.space.prevent="selectSpecialty('')"
       >
         <div class="card-top">
           <span class="specialty-code-badge general">ОБЩИЕ</span>
@@ -83,7 +93,12 @@
         v-for="year in availableYears" 
         :key="year"
         class="drill-card year-card"
+        role="button"
+        tabindex="0"
+        :aria-label="`${year} год поступления, ${calculateCourse(year)}`"
         @click="selectYear(year)"
+        @keydown.enter="selectYear(year)"
+        @keydown.space.prevent="selectYear(year)"
       >
         <div class="year-circle">
           <span class="year-num">{{ year }}</span>
@@ -103,7 +118,12 @@
         v-for="grp in availableGroups" 
         :key="grp.id"
         class="drill-card group-card"
+        role="button"
+        tabindex="0"
+        :aria-label="`Группа ${grp.name}, показать расписание`"
         @click="selectGroup(grp.id)"
+        @keydown.enter="selectGroup(grp.id)"
+        @keydown.space.prevent="selectGroup(grp.id)"
       >
         <span class="group-code-pill">Группа</span>
         <h3 class="group-name">{{ grp.name }}</h3>
@@ -236,8 +256,12 @@ function goToSpecialties() {
   step.value = 'specialty';
 }
 
-// 15. Возврат к годам
+// 15. Возврат к годам (с проверкой наличия годов)
 function goToYears() {
+  if (!availableYears.value.length) {
+    goToSpecialties();
+    return;
+  }
   chosenYear.value = null;
   step.value = 'year';
 }
@@ -253,6 +277,7 @@ function goToYears() {
   flex-direction: column;
   padding: 10px 0 40px;
   min-height: 60vh;
+  overflow-x: clip;
 }
 
 /* 1. Насыщенный светящийся центральный оранжевый круг */
@@ -438,6 +463,8 @@ function goToYears() {
   line-height: 1.4;
   margin-bottom: 16px;
   flex: 1;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .card-action {
@@ -542,6 +569,8 @@ function goToYears() {
   font-weight: 800;
   color: var(--ink-primary);
   margin-bottom: 10px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .open-schedule-btn {
@@ -565,6 +594,16 @@ function goToYears() {
   }
   .drill-title {
     font-size: 20px;
+  }
+  .ambient-orange-orb {
+    width: min(380px, 86vw);
+    height: min(380px, 86vw);
+    filter: blur(36px);
+  }
+  .ambient-orange-glow {
+    width: min(520px, 94vw);
+    height: min(520px, 94vw);
+    filter: blur(48px);
   }
 }
 </style>

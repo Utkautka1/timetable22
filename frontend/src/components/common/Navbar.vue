@@ -51,6 +51,7 @@
         title="Текущая пара. Нажмите, чтобы открыть звонки"
         @click="handleBellsClick"
         @keydown.enter="handleBellsClick"
+        @keydown.space.prevent="handleBellsClick"
       >
         <span class="pulse-indicator"></span>
         <span class="pair-text">Пара {{ activePair.period }}</span>

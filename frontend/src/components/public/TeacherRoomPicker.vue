@@ -85,7 +85,12 @@
             v-for="t in filteredTeachers"
             :key="t.id"
             class="teacher-card"
+            role="button"
+            tabindex="0"
+            :aria-label="`Преподаватель ${t.name}`"
             @click="$emit('select', t.id)"
+            @keydown.enter="$emit('select', t.id)"
+            @keydown.space.prevent="$emit('select', t.id)"
           >
             <div class="teacher-card-main">
               <span class="teacher-card-name">{{ t.name }}</span>
@@ -119,7 +124,12 @@
               v-for="t in deptGroup.teachers"
               :key="t.id"
               class="teacher-card"
+              role="button"
+              tabindex="0"
+              :aria-label="`Преподаватель ${t.name}`"
               @click="$emit('select', t.id)"
+              @keydown.enter="$emit('select', t.id)"
+              @keydown.space.prevent="$emit('select', t.id)"
             >
               <div class="teacher-card-main">
                 <span class="teacher-card-name">{{ t.name }}</span>
@@ -138,9 +148,29 @@
         <p class="picker-subtitle">Выберите корпус и кабинет колледжа</p>
       </div>
 
+      <!-- Табы переключения корпусов -->
+      <div class="campus-tabs-bar" aria-label="Переключение корпусов">
+        <button
+          type="button"
+          :class="['dept-tab-btn', { active: !activeCampus }]"
+          @click="activeCampus = ''"
+        >
+          Все корпуса ({{ totalRoomsCount }})
+        </button>
+        <button
+          v-for="c in campusGroups"
+          :key="c.badge"
+          type="button"
+          :class="['dept-tab-btn', { active: activeCampus === c.badge }]"
+          @click="activeCampus = activeCampus === c.badge ? '' : c.badge"
+        >
+          {{ c.badge }} ({{ c.rooms.length }})
+        </button>
+      </div>
+
       <div class="campuses-list">
         <div 
-          v-for="campus in campusGroups" 
+          v-for="campus in displayedCampusGroups" 
           :key="campus.title" 
           class="campus-block"
         >
@@ -179,9 +209,14 @@ defineEmits(['select']);
 const searchQuery = ref('');
 const activeDepartmentId = ref('');
 const activeLetter = ref('');
+const activeCampus = ref('');
 
 const totalTeachersCount = computed(() => {
   return props.role === 'teacher' ? props.items.length : 0;
+});
+
+const totalRoomsCount = computed(() => {
+  return props.role === 'room' ? props.items.length : 0;
 });
 
 function extractShortDept(fullName) {
@@ -228,10 +263,16 @@ const availableDepartments = computed(() => {
   return list;
 });
 
+// Кэшированный отсортированный список преподавателей для устранения повторной сортировки при поиске
+const sortedTeachers = computed(() => {
+  if (props.role !== 'teacher') return [];
+  return [...props.items].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+});
+
 const availableLetters = computed(() => {
   if (props.role !== 'teacher') return [];
   const set = new Set();
-  props.items.forEach(t => {
+  sortedTeachers.value.forEach(t => {
     let first = (t.name || '').trim().charAt(0).toUpperCase();
     if (first === 'Ё') first = 'Е';
     if (first && /[А-Я]/.test(first)) set.add(first);
@@ -262,22 +303,30 @@ function matchTeacherDept(t, deptId) {
 
 const filteredTeachers = computed(() => {
   if (props.role !== 'teacher') return [];
-  return [...props.items]
-    .filter(t => matchTeacherDept(t, activeDepartmentId.value))
-    .filter(t => matchTeacherLetter(t, activeLetter.value))
-    .filter(t => matchTeacherQuery(t, searchQuery.value))
-    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+  const deptId = activeDepartmentId.value;
+  const letter = activeLetter.value;
+  const query = searchQuery.value;
+  if (!deptId && !letter && !query) return sortedTeachers.value;
+  return sortedTeachers.value.filter(t => 
+    matchTeacherDept(t, deptId) &&
+    matchTeacherLetter(t, letter) &&
+    matchTeacherQuery(t, query)
+  );
 });
 
 const teachersGroupedByDept = computed(() => {
   if (props.role !== 'teacher') return [];
+  const deptBuckets = new Map();
+  sortedTeachers.value.forEach(t => {
+    const dId = (t.departmentId && deptNameMap.value.has(String(t.departmentId))) ? String(t.departmentId) : 'unassigned';
+    if (!deptBuckets.has(dId)) deptBuckets.set(dId, []);
+    deptBuckets.get(dId).push(t);
+  });
   const groups = [];
   availableDepartments.value.forEach(dept => {
-    const inDept = props.items
-      .filter(t => matchTeacherDept(t, dept.id))
-      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
-    if (inDept.length > 0) {
-      groups.push({ id: dept.id, name: dept.name, shortName: dept.shortName, teachers: inDept });
+    const list = deptBuckets.get(String(dept.id));
+    if (list && list.length > 0) {
+      groups.push({ id: dept.id, name: dept.name, shortName: dept.shortName, teachers: list });
     }
   });
   return groups;
@@ -287,6 +336,7 @@ function resetAllFilters() {
   searchQuery.value = '';
   activeDepartmentId.value = '';
   activeLetter.value = '';
+  activeCampus.value = '';
 }
 
 function sortRoomsAlphabetical(a, b) {
@@ -316,6 +366,11 @@ const campusGroups = computed(() => {
     { title: 'ул. Садовая, 54', badge: 'САДОВАЯ', rooms: sadovayaRooms.sort(sortRoomsAlphabetical) }
   ].filter(c => c.rooms.length > 0);
 });
+
+const displayedCampusGroups = computed(() => {
+  if (!activeCampus.value) return campusGroups.value;
+  return campusGroups.value.filter(c => c.badge === activeCampus.value);
+});
 </script>
 
 <style scoped>
@@ -325,11 +380,12 @@ const campusGroups = computed(() => {
   max-width: 1240px;
   margin: 0 auto;
   min-height: 60vh;
+  overflow-x: clip;
 }
 
 .ambient-orange-orb {
   position: absolute;
-  top: 40%;
+  top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(640px, 88vw);
@@ -351,7 +407,7 @@ const campusGroups = computed(() => {
 
 .ambient-orange-glow {
   position: absolute;
-  top: 40%;
+  top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(940px, 98vw);
@@ -419,6 +475,7 @@ const campusGroups = computed(() => {
   color: var(--ink-primary);
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-light);
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
@@ -470,6 +527,7 @@ const campusGroups = computed(() => {
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   font-size: 12px;
   font-weight: 700;
   color: var(--ink-secondary);
@@ -504,6 +562,7 @@ const campusGroups = computed(() => {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   font-weight: 700;
   font-size: 13px;
   color: var(--ink-secondary);
@@ -561,6 +620,7 @@ const campusGroups = computed(() => {
   padding: 14px 16px;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 12px;
   cursor: pointer;
@@ -584,12 +644,16 @@ const campusGroups = computed(() => {
   font-size: 14px;
   font-weight: 700;
   color: var(--ink-primary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .teacher-card-profile {
   font-size: 11.5px;
   color: var(--ink-muted);
   line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .teacher-dept-tag {
@@ -663,6 +727,15 @@ const campusGroups = computed(() => {
   font-size: 14px;
 }
 
+.campus-tabs-bar {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
 .campuses-list {
   position: relative;
   z-index: 2;
@@ -728,5 +801,24 @@ const campusGroups = computed(() => {
   color: #ffffff;
   border-color: var(--blue-600);
   transform: translateY(-1px);
+}
+
+@media (max-width: 640px) {
+  .teachers-grid {
+    grid-template-columns: 1fr;
+  }
+  .picker-title {
+    font-size: 20px;
+  }
+  .ambient-orange-orb {
+    width: min(380px, 86vw);
+    height: min(380px, 86vw);
+    filter: blur(36px);
+  }
+  .ambient-orange-glow {
+    width: min(520px, 94vw);
+    height: min(520px, 94vw);
+    filter: blur(48px);
+  }
 }
 </style>
