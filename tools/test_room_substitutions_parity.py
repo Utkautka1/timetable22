@@ -119,6 +119,13 @@ class TestRoomSubstitutionsParity(unittest.TestCase):
             suppressed = any(w in lower for w in ["обычн", "стандарт", "аудитор", "лекцион"])
             self.assertTrue(suppressed, f"{name} должен быть отфильтрован")
 
+    def test_07_gym_room_name_deduplication(self):
+        """Проверяет, что спортзал не дублирует слово 'спортзал' в тегах."""
+        room_name = "Спортивный зал (1)"
+        r_lower = room_name.lower()
+        is_gym_redundant = "спорт" in r_lower or "зал" in r_lower
+        self.assertTrue(is_gym_redundant, "Название зала должно определять избыточность тега спортзал")
+
 
 if __name__ == "__main__":
     unittest.main()

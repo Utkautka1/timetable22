@@ -157,9 +157,15 @@ function resolveRoomSizeLabel(sizeObj, capacity = 0) {
   return '';
 }
 
-function resolveMeaningfulTypeLabel(cats, typeObj) {
+function resolveMeaningfulTypeLabel(cats, typeObj, roomName = '') {
+  const rName = String(roomName || '').toLowerCase();
+  if (cats.isGym && (rName.includes('спорт') || rName.includes('зал'))) return '';
+  if (cats.isArt && (rName.includes('худож') || rName.includes('изо'))) return '';
+  if (cats.isLab && rName.includes('лабор')) return '';
+  if (cats.isComputer) {
+    return (rName.includes('комп') || rName.includes('информ')) ? '' : 'компьютерная';
+  }
   if (cats.isArt) return 'художественная';
-  if (cats.isComputer) return 'компьютерная';
   if (cats.isLab) return 'лаборатория';
   if (cats.isGym) return 'спортзал';
   const name = String(typeObj?.name || '').trim();
@@ -167,29 +173,31 @@ function resolveMeaningfulTypeLabel(cats, typeObj) {
   if (!name || ['обычная', 'стандартная', 'аудитория', 'кабинет', 'лекционная'].some(w => lower.includes(w))) {
     return '';
   }
-  return name;
+  return rName.includes(lower) ? '' : name;
 }
 
-function buildRoomTagLabel(sizeLabel, typeLabel, isSpecial, capacity) {
+function buildRoomTagLabel(sizeLabel, typeLabel, isSpecial, capacity, roomName = '') {
+  const isGym = String(roomName || '').toLowerCase().includes('спорт');
   const parts = [];
-  if (sizeLabel && (isSpecial || sizeLabel === 'большая')) {
+  if (sizeLabel && !isGym && (isSpecial || sizeLabel === 'большая')) {
     parts.push(sizeLabel);
   }
   if (typeLabel) {
     parts.push(typeLabel);
   }
-  return parts.join(' · ') || (capacity >= 40 ? `${capacity} мест` : '');
+  return parts.join(' · ') || (!isGym && capacity >= 40 ? `${capacity} мест` : '');
 }
 
 export function getRoomCategoryDetails(room, roomTypes = [], roomSizes = []) {
   if (!room) return { tagLabel: '', description: '', isArt: false, isComputer: false, isLab: false };
+  const rName = String(room.name || '');
   const typeObj = (roomTypes || []).find(t => String(t.id) === String(room.typeId));
   const sizeObj = (roomSizes || []).find(s => String(s.id) === String(room.sizeId));
   const cats = resolveRoomTypeCategory(room, typeObj);
   const sizeLabel = resolveRoomSizeLabel(sizeObj, room.capacity || 0);
-  const typeLabel = resolveMeaningfulTypeLabel(cats, typeObj);
+  const typeLabel = resolveMeaningfulTypeLabel(cats, typeObj, rName);
   const isSpecial = cats.isArt || cats.isComputer || cats.isLab || cats.isGym || Boolean(typeLabel);
-  const tagLabel = buildRoomTagLabel(sizeLabel, typeLabel, isSpecial, room.capacity || 0);
+  const tagLabel = buildRoomTagLabel(sizeLabel, typeLabel, isSpecial, room.capacity || 0, rName);
   const mainTypeTitle = typeObj?.name || (cats.isArt ? 'Художественный кабинет' : (cats.isComputer ? 'Компьютерный класс' : 'Аудитория'));
   const sizeDesc = sizeLabel ? `${sizeLabel} (${room.capacity || 0} мест)` : (room.capacity ? `${room.capacity} мест` : '');
   const descParts = [mainTypeTitle, sizeDesc, room.equipment].filter(Boolean);

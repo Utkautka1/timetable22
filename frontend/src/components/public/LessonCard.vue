@@ -35,6 +35,11 @@
 
         <div class="badges-row">
           <span v-if="isRemote" class="format-badge remote" title="Дистанционное занятие">
+            <svg class="badge-icon-remote" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
             Дистант
           </span>
           <span v-if="subgroupBadge" class="subgroup-badge">
@@ -175,7 +180,7 @@
           <span v-if="roomCategoryBadge" class="room-tag-mini">{{ roomCategoryBadge }}</span>
         </div>
         <div v-else-if="isRemote" class="room-chip room-remote" title="Дистанционное занятие">
-          <span class="room-name">📍 дистанционно</span>
+          <span class="room-name">💻 дистанционно</span>
         </div>
 
         <!-- Нижний бейдж статуса замены/переноса (по скриншоту 1: ПЕРЕНОС) -->
@@ -749,9 +754,30 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
 }
 
 .format-badge.remote {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 2.5px 7px;
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgba(37, 99, 235, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.badge-icon-remote {
+  flex-shrink: 0;
+  stroke: #ffffff;
+}
+
+.room-chip.room-remote {
   background: #eff6ff;
+  border-color: #bfdbfe;
   color: #1d4ed8;
-  border: 1px solid #bfdbfe;
+  font-weight: 600;
 }
 
 .format-badge.inperson {
@@ -883,19 +909,19 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1 1 auto;
-  min-width: 120px;
+  flex: 0 1 auto;
+  min-width: 0;
   flex-wrap: wrap;
 }
 
 .teacher-info {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 12px;
   color: var(--ink-secondary);
-  flex: 1 1 auto;
-  min-width: 120px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .teacher-btn {
@@ -907,15 +933,15 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   text-align: left;
   border-radius: 4px;
   transition: opacity 0.15s ease;
-  flex: 1 1 auto;
-  min-width: 120px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .teacher-name {
   display: inline-block;
-  white-space: normal;
-  overflow-wrap: break-word;
-  word-break: normal;
+  font-weight: 500;
+  color: var(--ink-secondary);
+  white-space: nowrap;
   line-height: 1.25;
 }
 
@@ -949,7 +975,6 @@ const statusBadgeClass = computed(() => statusBadgeInfo.value?.class || '');
   color: var(--blue-700);
   white-space: nowrap;
   flex-shrink: 0;
-  margin-left: auto;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 

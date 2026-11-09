@@ -281,6 +281,20 @@ class TestUIVisualInteractions(unittest.TestCase):
                 has_inline = card.locator(".stream-inline").count() > 0
                 self.assertFalse(has_inline, "При наличии бейджа 'Поток' инлайн '· 🔗 поток' не должен дублироваться")
 
+    def test_15_remote_badge_accent_and_footer_alignment(self):
+        """Проверяет акцентный стиль бейджа 'Дистант' и естественную ширину элементов футера."""
+        self.select_first_group(width=1280, height=800)
+        footer = self.page.locator(".lesson-footer").first
+        if footer.count() > 0:
+            info = footer.locator(".teacher-info").first
+            if info.count() > 0:
+                grow = info.evaluate("el => window.getComputedStyle(el).flexGrow")
+                self.assertEqual(grow, "0", "teacher-info не должен искусственно раздуваться (flex-grow: 0)")
+        remote = self.page.locator(".format-badge.remote").first
+        if remote.count() > 0:
+            svg = remote.locator(".badge-icon-remote")
+            self.assertTrue(svg.count() > 0, "Бейдж 'Дистант' должен содержать векторную иконку онлайна")
+
 
 if __name__ == "__main__":
     unittest.main()
