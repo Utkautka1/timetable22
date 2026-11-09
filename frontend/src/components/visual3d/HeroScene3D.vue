@@ -352,6 +352,7 @@ onUnmounted(() => {
   color: var(--blue-700);
   margin-bottom: 14px;
   backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .badge-dot {

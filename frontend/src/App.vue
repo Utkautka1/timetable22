@@ -57,6 +57,7 @@
             :selectedId="selectedId"
             :selectedName="currentEntityName"
             v-model:selectedWeek="selectedWeek"
+            :hasSchedule="Boolean(currentSchedule.instances && currentSchedule.instances.length > 0)"
             @change-selection="handleChangeSelection"
             @export-csv="handleExportCSV"
             @print="handlePrint"
@@ -137,11 +138,11 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import Navbar from './components/common/Navbar.vue';
 import AppFooter from './components/common/AppFooter.vue';
 import Modal from './components/common/Modal.vue';
-import HeroScene3D from './components/visual3d/HeroScene3D.vue';
+const HeroScene3D = defineAsyncComponent(() => import('./components/visual3d/HeroScene3D.vue'));
 import FilterBar from './components/public/FilterBar.vue';
 import GroupDrillDown from './components/public/GroupDrillDown.vue';
 import TeacherRoomPicker from './components/public/TeacherRoomPicker.vue';
@@ -166,6 +167,7 @@ const isPopStateNavigating = ref(false);
 const { exportScheduleCSV, printSchedule } = useScheduleExport();
 
 const {
+  indexData,
   currentSchedule,
   loading,
   error,
@@ -335,6 +337,8 @@ onUnmounted(() => {
 <style scoped>
 .app-root {
   min-height: 100vh;
+  width: 100%;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   background-color: #f8fafc;
