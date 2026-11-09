@@ -474,8 +474,8 @@ const displayedCampusGroups = computed(() => {
   font-weight: 600;
   color: var(--ink-primary);
   background: rgba(255, 255, 255, 0.94);
-  backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border: 1px solid var(--border-light);
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
@@ -526,8 +526,8 @@ const displayedCampusGroups = computed(() => {
   border: 1px solid var(--border-light);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   font-size: 12px;
   font-weight: 700;
   color: var(--ink-secondary);
@@ -561,8 +561,8 @@ const displayedCampusGroups = computed(() => {
   border: 1px solid var(--border-light);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   font-weight: 700;
   font-size: 13px;
   color: var(--ink-secondary);
@@ -619,8 +619,8 @@ const displayedCampusGroups = computed(() => {
   gap: 8px;
   padding: 14px 16px;
   background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 12px;
   cursor: pointer;

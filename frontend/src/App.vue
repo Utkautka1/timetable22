@@ -267,7 +267,11 @@ function handleSelectTeacher(teacherId) {
 
 // 9. Открытие панели администратора
 function handleOpenAdmin() {
-  window.location.href = '/admin';
+  if (currentUser.value) {
+    isAdminMode.value = true;
+  } else {
+    isAuthModalOpen.value = true;
+  }
 }
 
 // 10. Обновление замен

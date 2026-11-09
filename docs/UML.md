@@ -23,6 +23,7 @@ flowchart LR
         Admin[AdminLayout.vue · Manager Dashboard]
         AdminSubs[AdminSubstitutionsEditor.vue · Reactive CRUD]
         TestClientFlows[tools/test_client_flows_e2e.py · E2E DOM & Flows Auditor]
+        TestUIVisual[tools/test_ui_visual_interactions.py · Visual, Responsive & Mobile Auditor]
         
         App --> Navbar
         App --> Hero
@@ -43,6 +44,11 @@ flowchart LR
         TestClientFlows -.-> DrillDown
         TestClientFlows -.-> EntityPicker
         TestClientFlows -.-> Navbar
+        TestUIVisual -.-> App
+        TestUIVisual -.-> Viewer
+        TestUIVisual -.-> Filter
+        TestUIVisual -.-> Modal
+        TestUIVisual -.-> AuthModal
 
         App --> SchedComposable[composables/useScheduleData.js]
         App --> AuthComposable[composables/useAuth.js]

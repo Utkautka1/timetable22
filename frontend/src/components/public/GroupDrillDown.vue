@@ -404,8 +404,8 @@ function goToYears() {
   position: relative;
   z-index: 2;
   background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 16px;
   padding: 20px;

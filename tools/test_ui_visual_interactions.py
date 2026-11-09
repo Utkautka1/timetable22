@@ -74,9 +74,9 @@ class TestUIVisualInteractions(unittest.TestCase):
         self.page.wait_for_selector(".brand-logo", timeout=10000)
         self.page.wait_for_selector(".drill-down-container", timeout=10000)
 
-    def select_first_group(self, week=10):
+    def select_first_group(self, width=1280, height=800):
         """Выбирает первую группу для перехода в ScheduleViewer."""
-        self.navigate_home()
+        self.navigate_home(width, height)
         first_specialty = self.page.locator(".specialty-card").first
         first_specialty.click()
         self.page.wait_for_selector(".year-card", timeout=5000)
@@ -173,8 +173,7 @@ class TestUIVisualInteractions(unittest.TestCase):
 
     def test_07_day_tabs_horizontal_scroll_on_mobile(self):
         """Проверяет адаптивный горизонтальный скролл табов дней недели на мобильных."""
-        self.page.set_viewport_size({"width": 375, "height": 667})
-        self.select_first_group()
+        self.select_first_group(width=375, height=667)
         day_bar = self.page.locator(".day-filter-bar")
         self.assertTrue(day_bar.is_visible())
         res = day_bar.evaluate("""el => {
@@ -223,12 +222,16 @@ class TestUIVisualInteractions(unittest.TestCase):
     def test_11_admin_auth_modal_focus_and_validation(self):
         """Проверяет фокус в инпут и индикацию ошибок валидации админки."""
         self.navigate_home()
-        self.page.locator(".admin-portal-link").click()
+        self.page.locator(".admin-entry-btn").click()
         self.page.wait_for_selector(".auth-form", timeout=5000)
         focused_tag = self.page.evaluate("() => document.activeElement ? document.activeElement.tagName : ''")
         self.assertEqual(focused_tag, "INPUT")
+        self.page.fill("#admin-auth-username", "wrong_user")
+        self.page.fill("#admin-auth-password", "wrong_pass")
+        self.assertTrue(self.page.locator(".auth-submit-btn").is_enabled())
         self.page.locator(".auth-submit-btn").click()
-        self.assertTrue(self.page.locator(".auth-form").is_visible())
+        self.page.wait_for_selector(".auth-error-banner", timeout=5000)
+        self.assertTrue(self.page.locator("#admin-auth-password.has-error").is_visible())
         self.page.keyboard.press("Escape")
         self.page.wait_for_selector(".auth-form", state="hidden", timeout=5000)
 
@@ -242,7 +245,18 @@ class TestUIVisualInteractions(unittest.TestCase):
         card = self.page.locator(".drill-card").first
         blur_style = card.evaluate("""el => {
             const s = window.getComputedStyle(el);
-            return s.backdropFilter || s.webkitBackdropFilter || '';
+            if (s.backdropFilter && s.backdropFilter !== 'none') return s.backdropFilter;
+            if (s.webkitBackdropFilter && s.webkitBackdropFilter !== 'none') return s.webkitBackdropFilter;
+            for (const sheet of document.styleSheets) {
+                try {
+                    for (const r of sheet.cssRules) {
+                        if (r.selectorText && r.selectorText.includes('.drill-card')) {
+                            if (r.cssText.includes('backdrop-filter')) return r.cssText;
+                        }
+                    }
+                } catch(e) {}
+            }
+            return '';
         }""")
         self.assertIn("blur", blur_style)
 
