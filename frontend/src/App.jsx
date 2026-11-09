@@ -28163,12 +28163,9 @@ export default function App() {
   };
   const exitAdmin = async () => {
     try { await authRequest("logout", {}); }
-    catch (error) { setLoadError(error.message); return; }
+    catch (_) {}
     presenceLeave(presenceSessionRef.current);
     window.location.replace("/");
-    setRole("student");
-    setCurrentUser(null);
-    if (typeof window !== "undefined") window.history.replaceState(null, "", "/");
   };
 
   const submitCreateFirstUser = async (name, login, pw1, pw2) => {
@@ -30310,7 +30307,7 @@ export default function App() {
           </div>
         )}
 
-        {role !== "admin" && (
+        {role !== "admin" && !isAdminEntryUrl() && (
           <div className="role-bar">
             {ROLES.map((r) => {
               const Icon = r.icon;
@@ -30399,12 +30396,12 @@ export default function App() {
               )}
             </>
           )}
-          {role === "student" && !publicPaused && <ReadOnlySchedule data={data} kind="group" initialViewId={publicGroupReturnId} initialSpecialtyRoute={publicSpecialtyRoute} scheduleLoading={publicScheduleLoading} syncUrl={!browserNavApplying} onViewChange={loadPublicScheduleTarget} onOpenTeacher={(teacherId, groupId) => { setPublicGroupReturnId(groupId || ""); setPublicTeacherJumpId(teacherId); setRole("teacher"); }} />}
-          {role === "teacher" && !publicPaused && <ReadOnlySchedule data={data} kind="teacher" initialViewId={publicTeacherJumpId} onOpenGroup={(groupId)=>{if (!groupId)return;setPublicGroupReturnId(groupId);setRole("student");}} scheduleLoading={publicScheduleLoading} syncUrl={!browserNavApplying} onViewChange={loadPublicScheduleTarget} />}
-          {role === "room" && !publicPaused && <ReadOnlySchedule data={data} kind="room" initialViewId={publicRoomJumpId} scheduleLoading={publicScheduleLoading} syncUrl={!browserNavApplying} onViewChange={loadPublicScheduleTarget} />}
+          {role === "student" && !isAdminEntryUrl() && !publicPaused && <ReadOnlySchedule data={data} kind="group" initialViewId={publicGroupReturnId} initialSpecialtyRoute={publicSpecialtyRoute} scheduleLoading={publicScheduleLoading} syncUrl={!browserNavApplying} onViewChange={loadPublicScheduleTarget} onOpenTeacher={(teacherId, groupId) => { setPublicGroupReturnId(groupId || ""); setPublicTeacherJumpId(teacherId); setRole("teacher"); }} />}
+          {role === "teacher" && !isAdminEntryUrl() && !publicPaused && <ReadOnlySchedule data={data} kind="teacher" initialViewId={publicTeacherJumpId} onOpenGroup={(groupId)=>{if (!groupId)return;setPublicGroupReturnId(groupId);setRole("student");}} scheduleLoading={publicScheduleLoading} syncUrl={!browserNavApplying} onViewChange={loadPublicScheduleTarget} />}
+          {role === "room" && !isAdminEntryUrl() && !publicPaused && <ReadOnlySchedule data={data} kind="room" initialViewId={publicRoomJumpId} scheduleLoading={publicScheduleLoading} syncUrl={!browserNavApplying} onViewChange={loadPublicScheduleTarget} />}
         </main>
 
-        {role !== "admin" && (
+        {role !== "admin" && !isAdminEntryUrl() && (
           <footer className="public-footer">
             <span>© {COLLEGE_NAME}</span>
             <button className="admin-entry-link" onClick={enterAdmin}>вход для сотрудников</button>
@@ -30538,7 +30535,7 @@ function PasswordGateModal({ mode, error, onClose, onSet, onEnter, onChange }) {
   const [pw2, setPw2] = useState("");
   const [oldPw, setOldPw] = useState("");
 
-  const title = mode === "set" ? "Первый вход — создайте учётную запись" : mode === "change" ? "Смена пароля" : "Вход для сотрудников";
+  const title = mode === "set" ? "Первый вход — создайте учётную запись" : mode === "change" ? "Смена пароля" : "Авторизация составителя";
 
   return (
     <Modal title={title} onClose={onClose}>
@@ -30548,7 +30545,7 @@ function PasswordGateModal({ mode, error, onClose, onSet, onEnter, onChange }) {
             <input autoFocus placeholder="Логин" value={login} onChange={(e) => setLogin(e.target.value)} />
             <input type="password" placeholder="Пароль" value={pw} onChange={(e) => setPw(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && onEnter(login, pw)} />
-            <button className="btn primary sm" onClick={() => onEnter(login, pw)}>Войти</button>
+            <button className="btn primary sm" onClick={() => onEnter(login, pw)}>Войти в панель управления</button>
           </>
         )}
         {mode === "set" && (
@@ -31097,7 +31094,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
 .nav-item:hover { background: rgba(255,255,255,0.06); color: var(--chalk); }
 .nav-item.active { background: var(--amber); color: var(--ink); font-weight: 700; }
 .sidebar-foot { margin-top: 10px; font-size: 11px; color: #6D7A8C; line-height: 1.5; padding: 10px 6px 0; }
-.sidebar-exit { margin-top: auto; background: none; border: none; color: #93A0B2; font-size: 12px; text-align: left; padding: 8px 6px; cursor: pointer; }
+.sidebar-exit { margin-top: 10px; background: none; border: none; color: #93A0B2; font-size: 12px; text-align: left; padding: 8px 6px; cursor: pointer; }
 .sidebar-exit:hover { color: var(--chalk); }
 
 .presence-sidebar { margin-top: 14px; border-top: 1px solid rgba(255,255,255,.08); border-bottom: 1px solid rgba(255,255,255,.08); padding: 12px 6px; }

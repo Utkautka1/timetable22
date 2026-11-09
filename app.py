@@ -1216,7 +1216,7 @@ def _public_sub_instance_matches(project, sub, kind, entity_id, loads_by_id, ins
         return eid in _public_instance_teacher_ids(project, inst, loads_by_id)
     if kind == "room":
         iid = str(inst.get("instId") or "")
-        a = assignment.get(iid) if isinstance(assignment, dict) else {}
+        a = (assignment.get(iid) if isinstance(assignment, dict) else {}) or {}
         rids = {str(inst.get("roomId") or ""), str(inst.get("dedicatedRoomId") or ""), str(a.get("roomId") or "")} - {""}
         return eid in rids
     return False
@@ -1256,7 +1256,7 @@ def _filter_raw_instances(project, instances, kind, entity_id, loads_by_id, assi
             chosen.append(inst)
         elif kind == "room":
             iid = str(inst.get("instId") or "")
-            a = assignment.get(iid) if iid else {}
+            a = (assignment.get(iid) if iid else {}) or {}
             rids = {str(inst.get("roomId") or ""), str(inst.get("dedicatedRoomId") or ""), str(a.get("roomId") or "")} - {""}
             if entity_id in rids:
                 chosen.append(inst)

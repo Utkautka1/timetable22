@@ -150,7 +150,7 @@
     <AdminAuthModal
       :isOpen="isAuthModalOpen"
       @close="isAuthModalOpen = false"
-      @login-success="isAdminMode = true"
+      @login-success="handleLoginSuccess"
     />
   </div>
 </template>
@@ -295,10 +295,16 @@ function handleSelectTeacher(teacherId) {
 // 9. Открытие панели администратора
 function handleOpenAdmin() {
   if (currentUser.value) {
-    isAdminMode.value = true;
+    window.location.href = '/admin';
   } else {
     isAuthModalOpen.value = true;
   }
+}
+
+// 9.1 Успешная авторизация составителя -> переход в полный редактор
+function handleLoginSuccess(user) {
+  isAuthModalOpen.value = false;
+  window.location.href = '/admin';
 }
 
 // 10. Обновление замен
@@ -366,6 +372,11 @@ onMounted(async () => {
   await loadPublicIndex();
   updateDocumentTitle();
   await checkSession();
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('auth') === 'admin') {
+    isAuthModalOpen.value = true;
+    window.history.replaceState(null, '', window.location.pathname);
+  }
   if (window.location.pathname.startsWith('/admin') && currentUser.value) {
     isAdminMode.value = true;
   }
