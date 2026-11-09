@@ -1,16 +1,20 @@
 <template>
   <SpatialCard :maxTilt="5" class="lesson-card-wrapper">
     <div :class="['lesson-item', { 'has-substitution': hasSub, 'is-cancelled': isCancelled, 'is-event': isEvent }]">
-      <!-- Плашка замены / отмены -->
-      <div v-if="hasSub" class="sub-alert-bar">
-        <svg v-if="isCancelled" class="sub-icon-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <!-- Плашка замены / отмены / переноса -->
+      <div v-if="hasSub" :class="['sub-alert-bar', subAlertClass]">
+        <svg v-if="isMoved" class="sub-icon-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="9 14 4 9 9 4"></polyline>
+          <path d="M20 20v-7a4 4 0 0 0-4-4H4"></path>
+        </svg>
+        <svg v-else-if="isCancelled" class="sub-icon-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10"></circle>
           <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
         </svg>
         <svg v-else class="sub-icon-svg" viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
           <path d="M13 2L3 14h7v8l10-12h-7z"/>
         </svg>
-        <span class="sub-title">{{ isCancelled ? 'ОТМЕНА' : 'ЗАМЕНА' }}</span>
+        <span class="sub-title">{{ subAlertTitle }}</span>
         <span v-if="subDetails" class="sub-note">{{ subDetails }}</span>
       </div>
 
@@ -60,6 +64,12 @@
       <h4 :class="['subject-title', { 'cancelled-text': isCancelled }]">
         {{ effectiveSubject }}
       </h4>
+
+      <!-- Строка пояснения переноса -->
+      <div v-if="sourceMoveText" class="source-move-row">
+        <span class="source-move-arrow">↪</span>
+        <span class="source-move-text">{{ sourceMoveText }}</span>
+      </div>
 
       <!-- Подвал карточки: Группы / Преподаватель / Аудитория -->
       <div class="lesson-footer">
@@ -148,9 +158,10 @@
         <div 
           v-if="formattedRoom && !isRemote && !isCancelled" 
           :class="['room-chip', { 'room-substituted': hasRoomSub }]"
-          :title="`Аудитория: ${effectiveRoom}`"
+          :title="`Аудитория: ${effectiveRoom}${roomCategoryBadge ? ` (${roomCategoryBadge})` : ''}`"
         >
           <span class="room-name">{{ formattedRoom }}</span>
+          <span v-if="roomCategoryBadge" class="room-tag-mini">{{ roomCategoryBadge }}</span>
         </div>
       </div>
     </div>
@@ -160,6 +171,7 @@
 <script setup>
 import { computed } from 'vue';
 import SpatialCard from '../common/SpatialCard.vue';
+import { formatDateDM } from '../../utils/scheduleSubstitutions.js';
 
 const props = defineProps({
   role: { type: String, default: 'group' },
@@ -173,6 +185,7 @@ const props = defineProps({
   getGroupName: { type: Function, default: null },
   getTeacherName: { type: Function, default: null },
   getRoomName: { type: Function, default: null },
+  getRoomDetails: { type: Function, default: null },
   getRoomLocation: { type: Function, default: () => '' },
   getSubjectName: { type: Function, default: null },
   getLessonTypeName: { type: Function, default: () => '' },
@@ -229,9 +242,52 @@ const streamGroupsTitle = computed(() => {
 
 const hasSub = computed(() => Boolean(props.substitution));
 
+const isMovedTarget = computed(() => {
+  if (props.instance?._isMovedSynthetic || props.substitution?.isMovedTarget) return true;
+  if (props.substitution?.type === 'moved' && props.substitution?.targetDate) {
+    return String(props.substitution.targetDate) === String(props.dateISO);
+  }
+  return false;
+});
+
+const isMovedAway = computed(() => {
+  return Boolean(props.substitution?.type === 'moved' && !isMovedTarget.value);
+});
+
+const isMoved = computed(() => isMovedTarget.value || isMovedAway.value);
+
 const isCancelled = computed(() => {
+  if (isMovedTarget.value) return false;
   const type = props.substitution?.type;
   return ['cancel', 'cancel_assignment', 'pending_move', 'moved', 'excursion'].includes(type);
+});
+
+const subAlertTitle = computed(() => {
+  if (isMoved.value) return 'ПЕРЕНОС';
+  if (isCancelled.value) return 'ОТМЕНА';
+  return 'ЗАМЕНА';
+});
+
+const subAlertClass = computed(() => {
+  if (isMoved.value) return 'alert-moved';
+  if (isCancelled.value) return 'alert-cancelled';
+  return 'alert-substitution';
+});
+
+const sourceMoveText = computed(() => {
+  if (!isMovedTarget.value) return '';
+  const srcDate = props.instance?.sourceDate || props.substitution?.sourceDate;
+  if (!srcDate) return '';
+  const dateFormatted = formatDateDM(srcDate);
+  const srcP = props.instance?.sourcePeriod !== undefined ? Number(props.instance.sourcePeriod) : props.substitution?.sourcePeriod;
+  const periodText = Number.isFinite(Number(srcP)) ? ` · ${Number(srcP) + 1} пары` : '';
+  return `Перенесено с ${dateFormatted}${periodText}`;
+});
+
+const roomCategoryBadge = computed(() => {
+  if (isRemote.value || !effectiveRoomId.value || !props.getRoomDetails) return '';
+  const details = props.getRoomDetails(effectiveRoomId.value);
+  return details?.tagLabel || '';
 });
 
 const isEvent = computed(() => {
@@ -357,8 +413,17 @@ function resolveTypeClass(name) {
 
 const typeBadgeClass = computed(() => resolveTypeClass(lessonType.value));
 
+function resolveMovedAwayText(sub) {
+  const targetDate = formatDateDM(sub.targetDate);
+  const targetP = Number.isFinite(Number(sub.targetPeriod)) ? `${Number(sub.targetPeriod) + 1} пара` : '';
+  const details = [targetDate ? `на ${targetDate}` : '', targetP].filter(Boolean).join(' · ');
+  return details ? `Перенесено ${details}` : 'Перенос занятия';
+}
+
 const subDetails = computed(() => {
   if (!props.substitution) return '';
+  if (isMovedAway.value) return resolveMovedAwayText(props.substitution);
+  if (isMovedTarget.value) return props.substitution.note || 'Перенос занятия';
   if (props.substitution.note) return props.substitution.note;
   if (isCancelled.value) return 'Занятие отменено';
   if (props.substitution.newTeacherId) return 'Замена преподавателя';
@@ -413,8 +478,47 @@ const subDetails = computed(() => {
   letter-spacing: 0.03em;
 }
 
+.sub-alert-bar.alert-moved {
+  background: #f59e0b;
+  color: #ffffff;
+}
+
 .lesson-item.is-cancelled .sub-alert-bar {
   background: #ef4444;
+}
+
+.lesson-item.is-cancelled .sub-alert-bar.alert-moved {
+  background: #f59e0b;
+}
+
+.source-move-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 3px 8px;
+  border-radius: 6px;
+  width: fit-content;
+  margin-top: 2px;
+}
+
+.source-move-arrow {
+  font-weight: 700;
+  color: #d97706;
+}
+
+.room-tag-mini {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ink-secondary);
+  background: rgba(15, 23, 42, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-left: 5px;
+  display: inline-block;
 }
 
 .sub-icon-svg {

@@ -84,6 +84,7 @@ class TestUIVisualInteractions(unittest.TestCase):
         self.page.wait_for_selector(".group-card", timeout=5000)
         self.page.locator(".group-card").first.click()
         self.page.wait_for_selector(".filter-bar", timeout=5000)
+        self.page.wait_for_selector(".day-filter-bar", timeout=8000)
 
     def assert_no_horizontal_scroll(self, viewport_name=""):
         """Проверяет отсутствие горизонтального скролла на странице."""
@@ -189,6 +190,7 @@ class TestUIVisualInteractions(unittest.TestCase):
     def test_08_day_tabs_active_highlight_and_filter(self):
         """Проверяет подсветку активного дня и фильтрацию пар."""
         self.select_first_group()
+        self.page.wait_for_selector(".day-pill-btn", timeout=8000)
         tabs = self.page.locator(".day-pill-btn")
         self.assertGreater(tabs.count(), 1)
         first_day_tab = tabs.nth(1)

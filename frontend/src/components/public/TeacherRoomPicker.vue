@@ -145,7 +145,47 @@
     <template v-else-if="role === 'room'">
       <div class="picker-header">
         <h2 class="picker-title">Аудиторный фонд</h2>
-        <p class="picker-subtitle">Выберите корпус и кабинет колледжа</p>
+        <p class="picker-subtitle">Выберите корпус, тип или воспользуйтесь поиском по кабинетам</p>
+      </div>
+
+      <!-- Панель поиска и фильтрации аудиторий -->
+      <div class="teacher-toolbar">
+        <div class="search-input-box">
+          <svg class="search-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            v-model="roomSearchQuery"
+            type="text"
+            placeholder="Поиск кабинета по номеру, типу (комп, худож, лаб) или оборудованию..."
+            class="teacher-search-input"
+            aria-label="Поиск кабинета"
+          />
+          <button
+            v-if="roomSearchQuery"
+            type="button"
+            class="clear-search-btn"
+            @click="roomSearchQuery = ''"
+            title="Очистить поиск"
+            aria-label="Очистить"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- Табы категорий аудиторий -->
+        <div class="dept-tabs-scroll" aria-label="Фильтр по типу кабинета">
+          <button
+            v-for="cat in roomCategoryTabs"
+            :key="cat.id"
+            type="button"
+            :class="['dept-tab-btn', { active: activeRoomCategory === cat.id }]"
+            @click="activeRoomCategory = activeRoomCategory === cat.id ? '' : cat.id"
+          >
+            {{ cat.label }}
+          </button>
+        </div>
       </div>
 
       <!-- Табы переключения корпусов -->
@@ -184,9 +224,11 @@
               :key="r.id"
               type="button"
               class="room-pick-btn"
+              :title="r._categoryDetails?.description ? `${r.name}: ${r._categoryDetails.description}` : r.name"
               @click="$emit('select', r.id)"
             >
-              {{ r.name }}
+              <span class="room-pick-name">{{ r.name }}</span>
+              <span v-if="r._categoryDetails?.tagLabel" class="room-pick-tag">{{ r._categoryDetails.tagLabel }}</span>
             </button>
           </div>
         </div>
@@ -197,11 +239,14 @@
 
 <script setup>
 import { ref, computed } from 'vue';
+import { getRoomCategoryDetails } from '../../utils/scheduleSubstitutions.js';
 
 const props = defineProps({
   role: { type: String, default: 'teacher' },
   items: { type: Array, default: () => [] },
-  departments: { type: Array, default: () => [] }
+  departments: { type: Array, default: () => [] },
+  roomTypes: { type: Array, default: () => [] },
+  roomSizes: { type: Array, default: () => [] }
 });
 
 defineEmits(['select']);
@@ -210,6 +255,18 @@ const searchQuery = ref('');
 const activeDepartmentId = ref('');
 const activeLetter = ref('');
 const activeCampus = ref('');
+const activeRoomCategory = ref('');
+const roomSearchQuery = ref('');
+
+const roomCategoryTabs = [
+  { id: '', label: 'Все кабинеты' },
+  { id: 'computer', label: '💻 Компьютерные' },
+  { id: 'art', label: '🎨 Художественные' },
+  { id: 'lab', label: '🔬 Лаборатории' },
+  { id: 'big', label: '🏛 Большие' },
+  { id: 'medium', label: '📐 Средние' },
+  { id: 'small', label: '🛋 Малые' }
+];
 
 const totalTeachersCount = computed(() => {
   return props.role === 'teacher' ? props.items.length : 0;
@@ -337,19 +394,49 @@ function resetAllFilters() {
   activeDepartmentId.value = '';
   activeLetter.value = '';
   activeCampus.value = '';
+  activeRoomCategory.value = '';
+  roomSearchQuery.value = '';
+}
+
+function matchRoomCategory(r, cat) {
+  if (!cat) return true;
+  const d = r._categoryDetails;
+  if (!d) return true;
+  if (cat === 'computer') return Boolean(d.isComputer);
+  if (cat === 'art') return Boolean(d.isArt);
+  if (cat === 'lab') return Boolean(d.isLab);
+  if (cat === 'big') return d.sizeLabel === 'большая';
+  if (cat === 'medium') return d.sizeLabel === 'средняя';
+  if (cat === 'small') return d.sizeLabel === 'малая';
+  return true;
+}
+
+function matchRoomSearch(r, query) {
+  if (!query) return true;
+  const q = String(query).toLowerCase().trim();
+  const name = String(r.name || '').toLowerCase();
+  const desc = String(r._categoryDetails?.description || '').toLowerCase();
+  const tag = String(r._categoryDetails?.tagLabel || '').toLowerCase();
+  const equip = String(r.equipment || '').toLowerCase();
+  return name.includes(q) || desc.includes(q) || tag.includes(q) || equip.includes(q);
+}
+
+function enrichRoom(r) {
+  return {
+    ...r,
+    _categoryDetails: getRoomCategoryDetails(r, props.roomTypes, props.roomSizes)
+  };
 }
 
 function sortRoomsAlphabetical(a, b) {
   return String(a.name).localeCompare(String(b.name), 'ru', { numeric: true });
 }
 
-const campusGroups = computed(() => {
-  if (props.role !== 'room') return [];
+function partitionRooms(rooms) {
   const mainRooms = [];
   const voznesenskyRooms = [];
   const sadovayaRooms = [];
-
-  props.items.forEach(r => {
+  rooms.forEach(r => {
     const name = String(r.name || '').toLowerCase();
     if (r.isExternal || name.startsWith('в-') || name.includes('возн')) {
       voznesenskyRooms.push(r);
@@ -359,11 +446,24 @@ const campusGroups = computed(() => {
       mainRooms.push(r);
     }
   });
+  return { mainRooms, voznesenskyRooms, sadovayaRooms };
+}
 
+const enrichedRooms = computed(() => {
+  if (props.role !== 'room') return [];
+  return props.items
+    .map(enrichRoom)
+    .filter(r => matchRoomCategory(r, activeRoomCategory.value))
+    .filter(r => matchRoomSearch(r, roomSearchQuery.value));
+});
+
+const campusGroups = computed(() => {
+  if (props.role !== 'room') return [];
+  const parts = partitionRooms(enrichedRooms.value);
   return [
-    { title: 'ул. Цветочная, 8 (Главный корпус)', badge: 'ЦВЕТОЧНАЯ', rooms: mainRooms.sort(sortRoomsAlphabetical) },
-    { title: 'Вознесенский пр., 44', badge: 'ВОЗНЕСЕНСКИЙ', rooms: voznesenskyRooms.sort(sortRoomsAlphabetical) },
-    { title: 'ул. Садовая, 54', badge: 'САДОВАЯ', rooms: sadovayaRooms.sort(sortRoomsAlphabetical) }
+    { title: 'ул. Цветочная, 8 (Главный корпус)', badge: 'ЦВЕТОЧНАЯ', rooms: parts.mainRooms.sort(sortRoomsAlphabetical) },
+    { title: 'Вознесенский пр., 44', badge: 'ВОЗНЕСЕНСКИЙ', rooms: parts.voznesenskyRooms.sort(sortRoomsAlphabetical) },
+    { title: 'ул. Садовая, 54', badge: 'САДОВАЯ', rooms: parts.sadovayaRooms.sort(sortRoomsAlphabetical) }
   ].filter(c => c.rooms.length > 0);
 });
 
@@ -784,23 +884,41 @@ const displayedCampusGroups = computed(() => {
 }
 
 .room-pick-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid var(--border-light);
   background: #f8fafc;
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--blue-800);
   cursor: pointer;
   transition: all 0.18s ease;
+  min-width: 64px;
 }
 
 .room-pick-btn:hover {
-  background: var(--blue-600);
-  color: #ffffff;
-  border-color: var(--blue-600);
+  background: var(--blue-50);
+  border-color: var(--blue-500);
   transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.1);
+}
+
+.room-pick-name {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--blue-900);
+}
+
+.room-pick-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: #0369a1;
+  background: #e0f2fe;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
 }
 
 @media (max-width: 640px) {

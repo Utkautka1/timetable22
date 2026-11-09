@@ -60,6 +60,24 @@
             <span v-if="dayObj.dateFormatted" class="day-date">{{ dayObj.dateFormatted }}</span>
           </div>
 
+          <!-- Свободные пары для кабинета (по скриншоту 1) -->
+          <div 
+            v-if="role === 'room' && getFreePeriodsForDay(dayObj.index).length" 
+            class="room-free-bar"
+            title="Пары, на которых кабинет свободен по опубликованному расписанию"
+          >
+            <span class="room-free-check">✓</span>
+            <span class="room-free-text">Свободно: {{ formatFreePeriods(getFreePeriodsForDay(dayObj.index)) }}</span>
+          </div>
+          <div 
+            v-else-if="role !== 'room' && getGapsForDay(dayObj.index).length" 
+            class="day-gaps-bar"
+            title="Свободное время между занятиями в этот день"
+          >
+            <span class="day-gaps-icon">🕳</span>
+            <span class="day-gaps-text">{{ getGapsForDay(dayObj.index).length === 1 ? 'Окно' : 'Окна' }}: {{ formatFreePeriods(getGapsForDay(dayObj.index)) }}</span>
+          </div>
+
           <div class="day-lessons">
             <template v-if="getLessonsForDay(dayObj.index).length">
               <LessonCard
@@ -76,6 +94,7 @@
                 :getGroupName="getGroupName"
                 :getTeacherName="getTeacherName"
                 :getRoomName="getRoomName"
+                :getRoomDetails="getRoomDetails"
                 :getRoomLocation="getRoomLocation"
                 :getSubjectName="getSubjectName"
                 :getLessonTypeName="getLessonTypeName"
@@ -97,13 +116,17 @@
 <script setup>
 import { ref, computed } from 'vue';
 import LessonCard from './LessonCard.vue';
+import { collectMovedLessonsForDate, calculateFreePeriods, calculateDayGaps } from '../../utils/scheduleSubstitutions.js';
 
 const DAY_NAMES = ['Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
 const SHORT_DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
 const props = defineProps({
   role: { type: String, default: 'group' },
+  selectedId: { type: String, default: '' },
   instances: { type: Array, default: () => [] },
+  substitutions: { type: Array, default: () => [] },
+  subjects: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
   selectedWeek: { type: Number, default: 10 },
   semesterStart: { type: String, default: '' },
@@ -111,6 +134,7 @@ const props = defineProps({
   getSubjectName: { type: Function, required: true },
   getTeacherName: { type: Function, required: true },
   getRoomName: { type: Function, required: true },
+  getRoomDetails: { type: Function, default: null },
   getRoomLocation: { type: Function, default: () => '' },
   getLessonTypeName: { type: Function, default: () => '' },
   getPeriodTime: { type: Function, default: () => '' },
@@ -212,12 +236,26 @@ function sortDayLessons(lessons, getPeriodTimeFn, dayIdx) {
   return decorated.map(d => d.inst);
 }
 
-const lessonsByDay = computed(() => {
+function populateBaseInstances(safeInsts) {
   const map = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [] };
-  safeInstances.value.forEach(inst => {
+  safeInsts.forEach(inst => {
     const d = Number(inst.day !== undefined ? inst.day : inst.blockIndex);
     if (map[d]) map[d].push(inst);
   });
+  return map;
+}
+
+function injectMovedLessons(map, p) {
+  for (let dayIdx = 0; dayIdx < 6; dayIdx += 1) {
+    const dateISO = formatISODate(p.semesterStart, p.selectedWeek, dayIdx);
+    const moved = collectMovedLessonsForDate(p.substitutions, p.instances, p.role, p.selectedId, dateISO, dayIdx, p.subjects);
+    if (moved.length) map[dayIdx].push(...moved);
+  }
+}
+
+const lessonsByDay = computed(() => {
+  const map = populateBaseInstances(safeInstances.value);
+  injectMovedLessons(map, props);
   Object.keys(map).forEach(key => {
     const dayIdx = Number(key);
     map[key] = sortDayLessons(map[key], props.getPeriodTime, dayIdx);
@@ -227,6 +265,34 @@ const lessonsByDay = computed(() => {
 
 function getLessonsForDay(dayIdx) {
   return lessonsByDay.value[dayIdx] || [];
+}
+
+function getActiveOccupiedPeriods(dayIdx) {
+  const dayLessons = getLessonsForDay(dayIdx);
+  const dateISO = formatISODate(props.semesterStart, props.selectedWeek, dayIdx);
+  return dayLessons
+    .filter(inst => {
+      const sub = props.findSub ? props.findSub(inst, dateISO, dayIdx, inst.period || 1) : null;
+      const isCancelled = sub && ['cancel', 'cancel_assignment', 'pending_move', 'moved'].includes(sub.type) && !sub.isMovedTarget;
+      return !isCancelled;
+    })
+    .map(inst => Number(inst.period) || 1);
+}
+
+function getFreePeriodsForDay(dayIdx) {
+  if (props.role !== 'room') return [];
+  const occupied = getActiveOccupiedPeriods(dayIdx);
+  return calculateFreePeriods(occupied, 7);
+}
+
+function getGapsForDay(dayIdx) {
+  if (props.role === 'room') return [];
+  const occupied = getActiveOccupiedPeriods(dayIdx);
+  return calculateDayGaps(occupied);
+}
+
+function formatFreePeriods(periods) {
+  return (periods || []).map(p => `${p} пара`).join(', ');
 }
 </script>
 
@@ -361,6 +427,40 @@ function getLessonsForDay(dayIdx) {
   padding: 3px 8px;
   border-radius: 8px;
   border: 1px solid rgba(249, 115, 22, 0.2);
+}
+
+.room-free-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: #fefce8;
+  border: 1px solid #fef08a;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #854d0e;
+}
+
+.room-free-check {
+  color: #16a34a;
+  font-weight: 800;
+  font-size: 13px;
+}
+
+.day-gaps-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #475569;
 }
 
 .day-count {

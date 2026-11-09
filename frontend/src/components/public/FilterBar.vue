@@ -6,6 +6,7 @@
         <span class="entity-type-label">{{ entityRoleLabel }}</span>
         <div class="entity-name-row">
           <h2 class="entity-name">{{ selectedName || 'Не выбрано' }}</h2>
+          <span v-if="entitySubtitle" class="entity-subtitle-badge" :title="entitySubtitle">{{ entitySubtitle }}</span>
         </div>
       </div>
 
@@ -98,6 +99,7 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   selectedId: { type: [String, Number], default: '' },
   selectedName: { type: String, default: '' },
+  entitySubtitle: { type: String, default: '' },
   selectedWeek: { type: Number, default: 10 },
   hasSchedule: { type: Boolean, default: true }
 });
@@ -176,6 +178,21 @@ function handleChangeClick() {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.entity-subtitle-badge {
+  font-size: 12px;
+  font-weight: 600;
+  color: #0369a1;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .entity-icon {

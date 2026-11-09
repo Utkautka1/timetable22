@@ -1283,6 +1283,7 @@ def _public_entity_data_patch(project, chosen_instances):
     load_ids = set()
     group_ids = set()
     teacher_ids = set()
+    room_ids = set()
     for inst in chosen_instances:
         if inst.get("loadId"):
             load_ids.add(str(inst.get("loadId")))
@@ -1292,6 +1293,10 @@ def _public_entity_data_patch(project, chosen_instances):
         group_ids.update(_instance_group_ids(inst))
         if inst.get("teacherId"):
             teacher_ids.add(str(inst.get("teacherId")))
+        if inst.get("roomId"):
+            room_ids.add(str(inst.get("roomId")))
+        if inst.get("dedicatedRoomId"):
+            room_ids.add(str(inst.get("dedicatedRoomId")))
         for tid in (inst.get("teacherIds") or []):
             if tid:
                 teacher_ids.add(str(tid))
@@ -1319,6 +1324,8 @@ def _public_entity_data_patch(project, chosen_instances):
             or str(row.get("groupId") or "") in group_ids
             or str(row.get("teacherId") or "") in teacher_ids
             or str(row.get("newTeacherId") or "") in teacher_ids
+            or str(row.get("roomId") or "") in room_ids
+            or str(row.get("newRoomId") or "") in room_ids
         )
     ]
     return {"loads": loads, "substitutions": substitutions}

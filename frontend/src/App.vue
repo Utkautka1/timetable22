@@ -56,6 +56,7 @@
             :role="selectedKind"
             :selectedId="selectedId"
             :selectedName="currentEntityName"
+            :entitySubtitle="selectedKind === 'room' ? getRoomDetails(selectedId).description : ''"
             v-model:selectedWeek="selectedWeek"
             :hasSchedule="Boolean(currentSchedule.instances && currentSchedule.instances.length > 0)"
             @change-selection="handleChangeSelection"
@@ -65,7 +66,10 @@
 
           <ScheduleViewer
             :role="selectedKind"
+            :selectedId="selectedId"
             :instances="currentSchedule.instances"
+            :substitutions="substitutions"
+            :subjects="subjects"
             :loading="loading"
             :selectedWeek="selectedWeek"
             :semesterStart="semesterConfig.semesterStart"
@@ -73,6 +77,7 @@
             :getSubjectName="getSubjectName"
             :getTeacherName="getTeacherName"
             :getRoomName="getRoomName"
+            :getRoomDetails="getRoomDetails"
             :getRoomLocation="getRoomLocation"
             :getLessonTypeName="getLessonTypeName"
             :getPeriodTime="getPeriodTime"
@@ -97,6 +102,8 @@
             :role="selectedKind"
             :items="currentItemsList"
             :departments="departments"
+            :roomTypes="roomTypes"
+            :roomSizes="roomSizes"
             @select="handleSelectEntity"
           />
         </template>
@@ -178,6 +185,8 @@ const {
   teachers,
   departments,
   rooms,
+  roomTypes,
+  roomSizes,
   subjects,
   specialties,
   lessonTypes,
@@ -188,6 +197,7 @@ const {
   getTeacherName,
   getSubjectName,
   getRoomName,
+  getRoomDetails,
   getRoomLocation,
   getGroupName,
   getLessonTypeName,

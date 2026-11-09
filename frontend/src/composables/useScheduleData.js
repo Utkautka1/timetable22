@@ -5,6 +5,7 @@
 import { ref, computed } from 'vue';
 import { publicIndexGet, publicScheduleGet } from '../storage.js';
 import { resolveInitialSelection, saveSelection, syncBrowserUrl } from './useRouteSync.js';
+import { getRoomCategoryDetails } from '../utils/scheduleSubstitutions.js';
 
 function mapInstancePlacement(inst, assignment) {
   const a = assignment[inst.instId] || assignment[inst.id] || {};
@@ -80,6 +81,8 @@ export function useScheduleData() {
   const subjects = computed(() => indexData.value?.data?.subjects || []);
   const specialties = computed(() => indexData.value?.data?.specialties || []);
   const lessonTypes = computed(() => indexData.value?.data?.lessonTypes || []);
+  const roomTypes = computed(() => indexData.value?.data?.roomTypes || []);
+  const roomSizes = computed(() => indexData.value?.data?.roomSizes || []);
   const semesterConfig = computed(() => indexData.value?.data?.config || {});
 
   const substitutions = computed({
@@ -167,6 +170,14 @@ export function useScheduleData() {
     return m;
   });
 
+  const roomDetailsMap = computed(() => {
+    const m = new Map();
+    rooms.value.forEach(r => {
+      if (r?.id) m.set(String(r.id), getRoomCategoryDetails(r, roomTypes.value, roomSizes.value));
+    });
+    return m;
+  });
+
   const substitutionsByDate = computed(() => {
     const map = new Map();
     substitutions.value.forEach(sub => {
@@ -191,6 +202,11 @@ export function useScheduleData() {
     if (!id) return '';
     const r = roomMap.value.get(String(id));
     return r ? (r.name || r.number || String(id)) : '';
+  }
+
+  function getRoomDetails(id) {
+    if (!id) return { tagLabel: '', description: '' };
+    return roomDetailsMap.value.get(String(id)) || { tagLabel: '', description: '' };
   }
 
   function getGroupName(id) {
@@ -235,6 +251,9 @@ export function useScheduleData() {
   }
 
   function findSubstitutionForLesson(instance, dateISO) {
+    if (instance?._isMovedSynthetic && instance?.substitution) {
+      return instance.substitution;
+    }
     const dateSubs = substitutionsByDate.value.get(String(dateISO)) || substitutions.value;
     return dateSubs.find(sub => matchSubWithLesson(sub, instance, dateISO));
   }
@@ -255,6 +274,8 @@ export function useScheduleData() {
     teachers,
     departments,
     rooms,
+    roomTypes,
+    roomSizes,
     subjects,
     specialties,
     lessonTypes,
@@ -265,6 +286,7 @@ export function useScheduleData() {
     getTeacherName,
     getSubjectName,
     getRoomName,
+    getRoomDetails,
     getRoomLocation,
     getGroupName,
     getLessonTypeName,

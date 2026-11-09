@@ -11,11 +11,12 @@ flowchart LR
         Navbar[Navbar.vue · Responsive Nav & Roles]
         Hero[HeroScene3D.vue · Three.js Central Orange Orb]
         DrillDown[GroupDrillDown.vue · Specialty->Year->Group Drilldown & A11y]
-        EntityPicker[TeacherRoomPicker.vue · Teachers 8-CK & Campus Tabs]
-        Viewer[ScheduleViewer.vue · Spatial Grid]
-        Card[LessonCard.vue · Lesson Card]
+        EntityPicker[TeacherRoomPicker.vue · Teachers 8-CK, Rooms Search & Category Tabs]
+        Viewer[ScheduleViewer.vue · Spatial Grid, Free Room Periods & Gaps]
+        Card[LessonCard.vue · Lesson Card, Target Moves & Room Badges]
         SpatialCard[SpatialCard.vue · 3D Specular Tilt]
-        Filter[FilterBar.vue · Breadcrumb & Week Navigation]
+        Filter[FilterBar.vue · Breadcrumb, Subtitle & Week Navigation]
+        SubUtil[frontend/src/utils/scheduleSubstitutions.js · Moved Subs, Free Periods & Room Types]
         Modal[Modal.vue · Accessible Modal & Esc]
         Bells[BellsSchedule.vue · Live Timer]
         Subs[SubstitutionsFeed.vue · Substitutions]
@@ -24,6 +25,7 @@ flowchart LR
         AdminSubs[AdminSubstitutionsEditor.vue · Reactive CRUD]
         TestClientFlows[tools/test_client_flows_e2e.py · E2E DOM & Flows Auditor]
         TestUIVisual[tools/test_ui_visual_interactions.py · Visual, Responsive & Mobile Auditor]
+        TestRoomSubs[tools/test_room_substitutions_parity.py · Room Substitutions & Free Periods Parity]
         
         App --> Navbar
         App --> Hero
@@ -31,6 +33,9 @@ flowchart LR
         App --> EntityPicker
         App --> Viewer
         Viewer --> Card
+        Viewer --> SubUtil
+        EntityPicker --> SubUtil
+        Card --> SubUtil
         Card --> SpatialCard
         App --> Filter
         App --> Modal
@@ -86,12 +91,14 @@ flowchart LR
         PerformanceTester["test_performance_and_leaks.py · Bundle & Memory Audit"]
         VueIntegration["test_vue_frontend_e2e.py · Flask & Static Integration"]
         DataContractTester["test_schedule_data_contract.py · Live API Data Stress & Shard Contract"]
+        RoomSubsTester["test_room_substitutions_parity.py · Room Substitutions & Free Periods Parity"]
         PlaywrightTester --> Frontend
         PlaywrightTester --> API
         VueIntegration --> API
         DataContractTester --> API
         DataContractTester --> SQLite
         DataContractTester --> Public
+        RoomSubsTester --> API
     end
 ```
 
