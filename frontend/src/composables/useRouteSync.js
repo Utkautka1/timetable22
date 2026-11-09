@@ -49,21 +49,25 @@ export function parseUrlHash(hash) {
 
 export function parseUrlSearch(search) {
   const params = new URLSearchParams(search || '');
-  const week = params.get('week') ? Number(params.get('week')) : null;
+  const rawWeek = params.get('week');
+  const numWeek = rawWeek ? Number(rawWeek) : null;
+  const week = (numWeek && !isNaN(numWeek) && numWeek > 0 && Number.isFinite(numWeek)) ? Math.floor(numWeek) : null;
   if (params.get('group')) return { kind: 'group', id: safeDecode(params.get('group')), week };
   if (params.get('teacher')) return { kind: 'teacher', id: safeDecode(params.get('teacher')), week };
   if (params.get('room')) return { kind: 'room', id: safeDecode(params.get('room')), week };
   if (params.get('kind') && params.get('id')) {
-    return { kind: params.get('kind'), id: safeDecode(params.get('id')), week };
+    return { kind: safeDecode(params.get('kind')), id: safeDecode(params.get('id')), week };
   }
   return { week };
 }
 
 function extractHashWeek() {
   if (typeof window === 'undefined' || !window.location.hash?.includes('?')) return null;
-  const qs = window.location.hash.split('?')[1];
+  const hash = window.location.hash;
+  const qs = hash.slice(hash.indexOf('?') + 1);
   const w = new URLSearchParams(qs).get('week');
-  return w ? Number(w) : null;
+  const num = w ? Number(w) : null;
+  return (num && !isNaN(num) && num > 0 && Number.isFinite(num)) ? Math.floor(num) : null;
 }
 
 export function parseCurrentRoute() {
@@ -90,8 +94,9 @@ export function readSavedSelection() {
 
 export function saveSelection(kind, id, week) {
   try {
-    if (!id) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ kind, id, week }));
+    if (!id || typeof id !== 'string') return;
+    const cleanWeek = (typeof week === 'number' && week > 0 && Number.isFinite(week)) ? Math.floor(week) : null;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ kind: String(kind || 'group'), id: String(id), week: cleanWeek }));
   } catch (err) {
     console.warn('Не удалось сохранить выбор расписания:', err);
   }
@@ -121,14 +126,19 @@ function resolveFallbackWeek(data, requestedWeek) {
 
 export function resolveInitialSelection(data) {
   const route = parseCurrentRoute();
-  const saved = readSavedSelection();
-  let targetKind = route.id ? route.kind : (saved?.id ? saved.kind : 'group');
-  let targetId = route.id || saved?.id || '';
-  let targetWeek = route.week || saved?.week || null;
+  const rawSaved = readSavedSelection();
+  const saved = (rawSaved && typeof rawSaved === 'object' && !Array.isArray(rawSaved)) ? rawSaved : null;
+  const validKinds = ['group', 'teacher', 'room'];
+  let targetKind = validKinds.includes(route.kind) ? route.kind : 'group';
+  if (!route.id && saved?.kind && validKinds.includes(saved.kind)) {
+    targetKind = saved.kind;
+  }
+  let targetId = (typeof route.id === 'string' && route.id) || (typeof saved?.id === 'string' && saved.id) || '';
+  let targetWeek = route.week || (typeof saved?.week === 'number' && saved.week > 0 ? saved.week : null);
 
   if (route.id && !entityExists(data, route.kind, route.id)) {
-    targetId = saved?.id && entityExists(data, saved.kind, saved.id) ? saved.id : '';
-    targetKind = targetId ? (saved?.kind || 'group') : 'group';
+    targetId = saved?.id && typeof saved.id === 'string' && entityExists(data, targetKind, saved.id) ? saved.id : '';
+    targetKind = targetId ? targetKind : 'group';
   } else if (targetId && !entityExists(data, targetKind, targetId)) {
     targetId = '';
   }

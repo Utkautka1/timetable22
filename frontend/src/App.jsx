@@ -10766,9 +10766,10 @@ function lessonLabel(inst, data) {
 
 function canonicalPublicInstId(value) {
   let id = String(value || "");
-  // Publication may wrap a previously published week occurrence again.
-  // Compare replacements against the original working instance identity.
-  while (/__PUBW\d+$/i.test(id)) id = id.replace(/__PUBW\d+$/i, "");
+  const rx = /__(?:PUBW\d+|EXACT_W\d+|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$/i;
+  while (rx.test(id)) {
+    id = id.replace(rx, "");
+  }
   return id;
 }
 

@@ -125,13 +125,19 @@ const MONTH_NAMES = [
 ];
 
 function computeScheduleDate(startStr, weekNum, dayIdx) {
-  if (!startStr || !weekNum) return null;
+  if (!startStr || !weekNum || dayIdx === undefined || dayIdx === null) return null;
   const p = String(startStr).split('-').map(Number);
   if (p.length < 3 || p.some(isNaN)) return null;
-  const dt = new Date(p[0], p[1] - 1, p[2], 12, 0, 0);
+  const [y, m, d] = p;
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m - 1, d, 12, 0, 0);
+  if (isNaN(dt.getTime()) || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  const numWeek = Number(weekNum);
+  const numDay = Number(dayIdx);
+  if (isNaN(numWeek) || isNaN(numDay)) return null;
   const mondayOffset = (dt.getDay() + 6) % 7;
-  dt.setDate(dt.getDate() - mondayOffset + (Number(weekNum) - 1) * 7 + Number(dayIdx));
-  return dt;
+  dt.setDate(dt.getDate() - mondayOffset + (numWeek - 1) * 7 + numDay);
+  return isNaN(dt.getTime()) ? null : dt;
 }
 
 function formatCalendarDate(startStr, weekNum, dayIdx) {
@@ -141,7 +147,7 @@ function formatCalendarDate(startStr, weekNum, dayIdx) {
 
 function formatISODate(startStr, weekNum, dayIdx) {
   const dt = computeScheduleDate(startStr, weekNum, dayIdx);
-  if (!dt) return '';
+  if (!dt || isNaN(dt.getTime())) return '';
   const y = dt.getFullYear();
   const m = String(dt.getMonth() + 1).padStart(2, '0');
   const d = String(dt.getDate()).padStart(2, '0');
@@ -195,6 +201,17 @@ function getLessonOrder(inst, getPeriodTimeFn, dayIdx) {
   return timeMins !== null ? timeMins : period * 100;
 }
 
+function sortDayLessons(lessons, getPeriodTimeFn, dayIdx) {
+  if (lessons.length <= 1) return lessons;
+  // Кэшируем порядок сортировки один раз (Schwartzian transform)
+  const decorated = lessons.map(inst => ({
+    inst,
+    order: getLessonOrder(inst, getPeriodTimeFn, dayIdx)
+  }));
+  decorated.sort((a, b) => a.order - b.order);
+  return decorated.map(d => d.inst);
+}
+
 const lessonsByDay = computed(() => {
   const map = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [] };
   safeInstances.value.forEach(inst => {
@@ -203,7 +220,7 @@ const lessonsByDay = computed(() => {
   });
   Object.keys(map).forEach(key => {
     const dayIdx = Number(key);
-    map[key].sort((a, b) => getLessonOrder(a, props.getPeriodTime, dayIdx) - getLessonOrder(b, props.getPeriodTime, dayIdx));
+    map[key] = sortDayLessons(map[key], props.getPeriodTime, dayIdx);
   });
   return map;
 });
@@ -257,11 +274,16 @@ function getLessonsForDay(dayIdx) {
   cursor: pointer;
   transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
   min-height: 38px;
+  user-select: none;
 }
 
 .day-pill-btn:hover {
   background: var(--blue-50);
   color: var(--blue-700);
+}
+
+.day-pill-btn:active {
+  transform: scale(0.96);
 }
 
 .day-pill-btn.active {
@@ -435,14 +457,24 @@ function getLessonsForDay(dayIdx) {
     box-sizing: border-box;
   }
   .day-filter-bar {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
     border-radius: 12px;
-    gap: 4px;
-    padding: 4px;
+    gap: 6px;
+    padding: 6px 8px;
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
   }
+  .day-filter-bar::-webkit-scrollbar {
+    display: none;
+  }
   .day-pill-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
     padding: 6px 10px;
     font-size: 12px;
   }
@@ -458,8 +490,8 @@ function getLessonsForDay(dayIdx) {
     border-radius: 12px;
   }
   .day-filter-bar {
-    gap: 3px;
-    padding: 3px;
+    gap: 4px;
+    padding: 4px 6px;
   }
   .day-pill-btn {
     padding: 5px 8px;

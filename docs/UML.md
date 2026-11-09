@@ -10,8 +10,8 @@ flowchart LR
         App[frontend/src/App.vue]
         Navbar[Navbar.vue · Responsive Nav & Roles]
         Hero[HeroScene3D.vue · Three.js Central Orange Orb]
-        DrillDown[GroupDrillDown.vue · Specialty->Year->Group Cards]
-        EntityPicker[TeacherRoomPicker.vue · Teachers Alphabet & Campus Rooms]
+        DrillDown[GroupDrillDown.vue · Specialty->Year->Group Drilldown & A11y]
+        EntityPicker[TeacherRoomPicker.vue · Teachers 8-CK & Campus Tabs]
         Viewer[ScheduleViewer.vue · Spatial Grid]
         Card[LessonCard.vue · Lesson Card]
         SpatialCard[SpatialCard.vue · 3D Specular Tilt]
@@ -22,6 +22,7 @@ flowchart LR
         AuthModal[AdminAuthModal.vue · Safe Login]
         Admin[AdminLayout.vue · Manager Dashboard]
         AdminSubs[AdminSubstitutionsEditor.vue · Reactive CRUD]
+        TestClientFlows[tools/test_client_flows_e2e.py · E2E DOM & Flows Auditor]
         
         App --> Navbar
         App --> Hero
@@ -38,6 +39,10 @@ flowchart LR
         AuthModal --> Modal
         App --> Admin
         Admin --> AdminSubs
+        TestClientFlows -.-> App
+        TestClientFlows -.-> DrillDown
+        TestClientFlows -.-> EntityPicker
+        TestClientFlows -.-> Navbar
 
         App --> SchedComposable[composables/useScheduleData.js]
         App --> AuthComposable[composables/useAuth.js]
@@ -69,6 +74,19 @@ flowchart LR
     GenWorker --> Scheduler[server_scheduler.mjs]
     OptWorker --> Scheduler
     API --> GraphScheduler[server_graph_scheduler.mjs]
+
+    subgraph Testing["E2E & Quality Automation Suite"]
+        PlaywrightTester["test_browser_buttons_playwright.py · Real Browser Button Clicks"]
+        PerformanceTester["test_performance_and_leaks.py · Bundle & Memory Audit"]
+        VueIntegration["test_vue_frontend_e2e.py · Flask & Static Integration"]
+        DataContractTester["test_schedule_data_contract.py · Live API Data Stress & Shard Contract"]
+        PlaywrightTester --> Frontend
+        PlaywrightTester --> API
+        VueIntegration --> API
+        DataContractTester --> API
+        DataContractTester --> SQLite
+        DataContractTester --> Public
+    end
 ```
 
 ## Хранение
@@ -341,5 +359,26 @@ flowchart TD
     - **Поддержка всех типов отмен и скрытие аудиторий (`LessonCard.vue`):** При отмене пары (`cancel`, `cancel_assignment`, `pending_move`, `moved`, `excursion`) физическая аудитория скрывается. Для преподавателя при замене отображается карточка заменяющего коллеги со ссылкой.
     - **Нормализация поиска и устойчивость к нераспознанным ЦК (`TeacherRoomPicker.vue`):** Поиск нормализует букву «ё» к «е», преподаватели с неизвестным `departmentId` не исчезают, а направляются в секцию «Общие». На мобильных инпутах установлен размер шрифта 16px (предотвращение зума iOS Safari).
     - **Синхронизация планировщика `addDays` и `server_scheduler.mjs`:** В `App.jsx` и `server_scheduler.mjs` параметр `n` в `addDays` приведен к числу (`Number(n)`), устранен риск строковой конкатенации `"31" + "0" = "310"`. Сохранена 100% SHA256-паритетность ядра планировщика.
+23. **Граничный фаззинг, устойчивость к аномальным данным и паритет идентификаторов (`tools/test_fuzzing_edge_cases.py`):**
+    - **Канонизация ID с составными цепочками суффиксов:** В `app.py`, `App.jsx` и `useScheduleData.js` унифицирована функция канонизации идентификаторов `canonicalPublicInstId` / `_canonical_public_inst_id`. Теперь поддерживаются цепочки любых составных суффиксов (`__PUBW`, `__EXACT_W`, `__TRANSFER_`, `__CANONICAL_RECOVER_`, `__REMOTE_ONE_`), спецсимволы, эмодзи, нестроковые типы и пустые строки, гарантируя 100% паритет бэкенда и фронтенда.
+    - **Абсолютная точность дат во всех 28 часовых поясах:** В `ScheduleViewer.vue` вызовы `computeScheduleDate` и `formatISODate` проверены на 30 660 датах за 2025–2027 годы во всех поясах от UTC-12 до UTC+14, високосных годах (2024, 2028), границах 29 февраля и переходах на летнее/зимнее время (DST). Невалидные календарные строки (`2026-13-45`, `invalid-date`, `null`, `undefined`) возвращают пустую строку без вывода `NaN-NaN-NaN`.
+    - **Фаззинг URL-парсинга:** Проверена устойчивость `parseUrlPath`, `parseUrlHash`, `parseUrlSearch` к XSS-инъекциям (`<script>`, `onerror`), path traversal (`../../etc/passwd`), null-байтам (`%00`), невалидному процентилю и множественным знакам вопроса (`?week=10?other=1`).
+    - **Иммунитет состояния и localStorage:** Реализована валидация `readSavedSelection` и `resolveInitialSelection` к битому JSON, примитивным типам вместо объектов (числа, массивы) и отравленным полям (`kind: 999, id: {}, week: NaN`), с безопасным падением в дефолтные значения.
+24. **Сквозное тестирование интерфейса и кнопок в реальном браузере через Playwright (`tools/test_browser_buttons_playwright.py`):**
+    - **Полнофункциональный headless Chromium E2E сьют:** 12 тестов автоматизации реального браузера, тестирующих физические клики мыши, клавиатурный ввод и проверки DOM.
+    - **Покрытие всех интерактивных элементов интерфейса:**
+      1. Переключение ролей (Преподаватели, Группы, Аудитории) с верификацией вкладок ЦК, алфавитного указателя и списков.
+      2. Поле поиска преподавателя с фильтрацией и кнопка быстрой очистки `✕`.
+      3. Клик по карточке преподавателя (напр. Колесникова К.М. `15bhvzk6`) и открытие сетки с проверкой URL.
+      4. Фильтрация сетки по дням недели (кнопки Пн–Сб и «Вся неделя»).
+      5. Переключение недель расписания (◀ / ▶) с валидацией счётчика.
+      6. Кнопка возврата к каталогу («Сменить преподавателя»).
+      7. Пошаговый выбор группы (Специальность → Год поступления → Группа).
+      8. Выбор аудитории по корпусам и открытие сетки кабинета.
+      9. Модальное окно звонков КТМУ: открытие и 3 сценария закрытия (кнопка `✕`, клик по оверлею, клавиша Escape).
+      10. Модальное окно оперативных замен.
+      11. Перекрёстные ссылки в карточках: клик по группе в расписании преподавателя и клик по преподавателю в расписании группы.
+      12. Адаптивный мобильный вьюпорт (375x667 iPhone SE) с проверкой отсутствия перекрытий и полной кликабельности элементов.
+    - **Контроль консоли и утечек:** Непрерывный перехват необработанных ошибок (`pageerror`) и консольных предупреждений (`console.error`).
 
 Устаревшие архивные копии (`tools/frontend/`, дубликаты планировщиков и временные отчёты) удалены из кодовой базы для поддержания чистоты репозитория.

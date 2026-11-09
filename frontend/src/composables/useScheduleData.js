@@ -28,7 +28,11 @@ const DEFAULT_TIMES = ['08:30–10:00', '10:10–11:40', '11:50–13:20', '14:00
 
 function canonicalPublicInstId(value) {
   let id = String(value || '');
-  return id.replace(/__(PUBW\d+|EXACT_W\d+|TRANSFER_[A-Za-z0-9_]+|CANONICAL_RECOVER_[A-Za-z0-9_]+|REMOTE_ONE_[A-Za-z0-9_]+)+$/gi, '');
+  const rx = /__(?:PUBW\d+|EXACT_W\d+|TRANSFER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|CANONICAL_RECOVER_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*|REMOTE_ONE_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*)$/i;
+  while (rx.test(id)) {
+    id = id.replace(rx, '');
+  }
+  return id;
 }
 
 function matchSubWithLesson(sub, inst, dateISO) {
@@ -132,38 +136,76 @@ export function useScheduleData() {
     }
   }
 
+  // Быстрые O(1) хэш-индексы для устранения линейного сканирования при рендеринге списков
+  const teacherMap = computed(() => {
+    const m = new Map();
+    teachers.value.forEach(t => { if (t?.id) m.set(String(t.id), t.name); });
+    return m;
+  });
+
+  const subjectMap = computed(() => {
+    const m = new Map();
+    subjects.value.forEach(s => { if (s?.id) m.set(String(s.id), s.name); });
+    return m;
+  });
+
+  const roomMap = computed(() => {
+    const m = new Map();
+    rooms.value.forEach(r => { if (r?.id) m.set(String(r.id), r); });
+    return m;
+  });
+
+  const groupMap = computed(() => {
+    const m = new Map();
+    groups.value.forEach(g => { if (g?.id) m.set(String(g.id), g); });
+    return m;
+  });
+
+  const lessonTypeMap = computed(() => {
+    const m = new Map();
+    lessonTypes.value.forEach(lt => { if (lt?.id) m.set(String(lt.id), lt.name); });
+    return m;
+  });
+
+  const substitutionsByDate = computed(() => {
+    const map = new Map();
+    substitutions.value.forEach(sub => {
+      const d = String(sub.date || '');
+      if (!map.has(d)) map.set(d, []);
+      map.get(d).push(sub);
+    });
+    return map;
+  });
+
   function getTeacherName(id) {
     if (!id) return 'Преподаватель не назначен';
-    const t = teachers.value.find(item => String(item.id) === String(id));
-    return t ? t.name : 'Преподаватель не назначен';
+    return teacherMap.value.get(String(id)) || 'Преподаватель не назначен';
   }
 
   function getSubjectName(id) {
     if (!id) return '—';
-    const s = subjects.value.find(item => String(item.id) === String(id));
-    return s ? s.name : String(id);
+    return subjectMap.value.get(String(id)) || String(id);
   }
 
   function getRoomName(id) {
     if (!id) return '';
-    const r = rooms.value.find(item => String(item.id) === String(id));
+    const r = roomMap.value.get(String(id));
     return r ? (r.name || r.number || String(id)) : '';
   }
 
   function getGroupName(id) {
     if (!id) return '';
-    const g = groups.value.find(item => String(item.id) === String(id));
+    const g = groupMap.value.get(String(id));
     return g ? g.name : String(id);
   }
 
   function getLessonTypeName(id) {
     if (!id) return '';
-    const lt = lessonTypes.value.find(item => String(item.id) === String(id));
-    return lt ? lt.name : String(id);
+    return lessonTypeMap.value.get(String(id)) || String(id);
   }
 
   function getRoomLocation(id, fallbackName = '') {
-    const r = id ? rooms.value.find(item => String(item.id) === String(id)) : null;
+    const r = id ? roomMap.value.get(String(id)) : null;
     const name = String(r?.name || fallbackName || '').trim();
     const lower = name.toLowerCase();
     if (lower.includes('садов') || lower.startsWith('с-')) {
@@ -182,7 +224,7 @@ export function useScheduleData() {
     if (dateStr && (cfg.shortenedDates || []).includes(dateStr) && cfg.shortenedPeriodTimes?.[idx]) {
       return cfg.shortenedPeriodTimes[idx];
     }
-    const g = groupId ? groups.value.find(item => String(item.id) === String(groupId)) : null;
+    const g = groupId ? groupMap.value.get(String(groupId)) : null;
     const parity = resolveParity(cfg, weekNum || selectedWeek.value);
     const custom = resolveGroupCustomTime(g, dayIndex, idx, parity);
     if (custom) return custom;
@@ -193,7 +235,8 @@ export function useScheduleData() {
   }
 
   function findSubstitutionForLesson(instance, dateISO) {
-    return substitutions.value.find(sub => matchSubWithLesson(sub, instance, dateISO));
+    const dateSubs = substitutionsByDate.value.get(String(dateISO)) || substitutions.value;
+    return dateSubs.find(sub => matchSubWithLesson(sub, instance, dateISO));
   }
 
   function updateSubstitutions(val) {
