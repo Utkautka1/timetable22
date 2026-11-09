@@ -3,7 +3,13 @@
     <div :class="['lesson-item', { 'has-substitution': hasSub, 'is-cancelled': isCancelled, 'is-event': isEvent }]">
       <!-- Плашка замены / отмены -->
       <div v-if="hasSub" class="sub-alert-bar">
-        <span class="sub-icon">{{ isCancelled ? '🚫' : '⚡' }}</span>
+        <svg v-if="isCancelled" class="sub-icon-svg" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line>
+        </svg>
+        <svg v-else class="sub-icon-svg" viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+          <path d="M13 2L3 14h7v8l10-12h-7z"/>
+        </svg>
         <span class="sub-title">{{ isCancelled ? 'ОТМЕНА' : 'ЗАМЕНА' }}</span>
         <span v-if="subDetails" class="sub-note">{{ subDetails }}</span>
       </div>
@@ -388,8 +394,10 @@ const subDetails = computed(() => {
   background: #ef4444;
 }
 
-.sub-icon {
-  font-size: 12px;
+.sub-icon-svg {
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
 }
 
 .sub-title {

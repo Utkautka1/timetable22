@@ -17,7 +17,12 @@
 
     <!-- Глобальный баннер ошибок -->
     <div v-if="error" class="global-error-banner" role="alert">
-      <span>⚠️ {{ error }}</span>
+      <svg class="error-alert-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
+      <span>{{ error }}</span>
       <button class="retry-load-btn" @click="loadPublicIndex">Повторить</button>
     </div>
 
@@ -41,6 +46,9 @@
 
     <!-- Публичный портал -->
     <template v-else>
+      <!-- 3D Центральный Chrono-Orb с оранжевой сферой (только на экране выбора) -->
+      <HeroScene3D v-if="!selectedId" />
+
       <main class="main-content">
         <!-- Режим 1: Просмотр сетки пар (когда сущность выбрана) -->
         <template v-if="selectedId">
@@ -58,6 +66,8 @@
             :role="selectedKind"
             :instances="currentSchedule.instances"
             :loading="loading"
+            :selectedWeek="selectedWeek"
+            :semesterStart="semesterConfig.semesterStart"
             :getGroupName="getGroupName"
             :getSubjectName="getSubjectName"
             :getTeacherName="getTeacherName"
@@ -85,6 +95,7 @@
           <TeacherRoomPicker
             :role="selectedKind"
             :items="currentItemsList"
+            :departments="departments"
             @select="handleSelectEntity"
           />
         </template>
@@ -162,11 +173,13 @@ const {
   selectedWeek,
   groups,
   teachers,
+  departments,
   rooms,
   subjects,
   specialties,
   lessonTypes,
   substitutions,
+  semesterConfig,
   loadPublicIndex,
   loadScheduleShard,
   getTeacherName,
@@ -200,20 +213,26 @@ const currentEntityName = computed(() => {
   return getGroupName(selectedId.value);
 });
 
+function updateDocumentTitle() {
+  if (typeof document === 'undefined') return;
+  const prefix = currentEntityName.value ? `${currentEntityName.value} — ` : '';
+  document.title = `${prefix}Расписание — КТМУ`;
+}
+
 // 3. Сброс к главному выбору
 function handleResetView() {
   selectedKind.value = 'group';
   selectedId.value = '';
   isAdminMode.value = false;
   saveSelection('group', '', selectedWeek.value);
-  syncBrowserUrl('group', '', selectedWeek.value);
+  syncBrowserUrl('group', '', selectedWeek.value, groups.value);
 }
 
 // 4. Переключение роли (Студент / Преподаватель / Аудитории)
 function handleSelectRole(role) {
   selectedKind.value = role;
   selectedId.value = '';
-  syncBrowserUrl(role, '', selectedWeek.value);
+  syncBrowserUrl(role, '', selectedWeek.value, groups.value);
 }
 
 // 5. Выбор студенческой группы через Drill-Down
@@ -230,7 +249,7 @@ function handleSelectEntity(entityId) {
 // 7. Смена сущности (возврат к пошаговому выбору)
 function handleChangeSelection() {
   selectedId.value = '';
-  syncBrowserUrl(selectedKind.value, '', selectedWeek.value);
+  syncBrowserUrl(selectedKind.value, '', selectedWeek.value, groups.value);
 }
 
 // 8. Переход к расписанию преподавателя из карточки пары
@@ -271,7 +290,8 @@ function handlePopState() {
 // Синхронизация URL и загрузка шарда при изменении сущности
 watch([selectedKind, selectedId, selectedWeek], () => {
   saveSelection(selectedKind.value, selectedId.value, selectedWeek.value);
-  syncBrowserUrl(selectedKind.value, selectedId.value, selectedWeek.value);
+  syncBrowserUrl(selectedKind.value, selectedId.value, selectedWeek.value, groups.value);
+  updateDocumentTitle();
   if (selectedId.value) {
     loadScheduleShard(selectedKind.value, selectedId.value, selectedWeek.value);
   }
@@ -279,7 +299,9 @@ watch([selectedKind, selectedId, selectedWeek], () => {
 
 onMounted(async () => {
   window.addEventListener('popstate', handlePopState);
+  updateDocumentTitle();
   await loadPublicIndex();
+  updateDocumentTitle();
   await checkSession();
   if (window.location.pathname.startsWith('/admin') && currentUser.value) {
     isAdminMode.value = true;

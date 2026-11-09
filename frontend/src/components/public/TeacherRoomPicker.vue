@@ -8,30 +8,125 @@
     <template v-if="role === 'teacher'">
       <div class="picker-header">
         <h2 class="picker-title">Преподаватели колледжа</h2>
-        <p class="picker-subtitle">Выберите преподавателя для просмотра расписания</p>
+        <p class="picker-subtitle">Поиск по фамилии и распределение по цикловым комиссиям (ЦК)</p>
       </div>
 
-      <!-- Быстрый алфавитный фильтр -->
-      <div class="alphabet-bar">
-        <button
-          v-for="letter in availableLetters"
-          :key="letter"
-          type="button"
-          :class="['letter-btn', { active: activeLetter === letter }]"
-          @click="activeLetter = activeLetter === letter ? '' : letter"
-        >
-          {{ letter }}
-        </button>
+      <!-- Панель инструментов: Поиск по фамилии -->
+      <div class="teacher-toolbar">
+        <div class="search-input-box">
+          <svg class="search-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="Поиск по фамилии или имени преподавателя..."
+            class="teacher-search-input"
+            aria-label="Поиск преподавателя"
+          />
+          <button
+            v-if="searchQuery"
+            type="button"
+            class="clear-search-btn"
+            @click="searchQuery = ''"
+            title="Очистить поиск"
+            aria-label="Очистить"
+          >
+            ✕
+          </button>
+        </div>
+
+        <!-- Табы фильтрации по ЦК -->
+        <div class="dept-tabs-scroll" aria-label="Фильтр по ЦК">
+          <button
+            type="button"
+            :class="['dept-tab-btn', { active: !activeDepartmentId }]"
+            @click="activeDepartmentId = ''"
+          >
+            Все ЦК ({{ totalTeachersCount }})
+          </button>
+          <button
+            v-for="dept in availableDepartments"
+            :key="dept.id"
+            type="button"
+            :class="['dept-tab-btn', { active: activeDepartmentId === dept.id }]"
+            @click="activeDepartmentId = activeDepartmentId === dept.id ? '' : dept.id"
+          >
+            {{ dept.shortName }} ({{ dept.count }})
+          </button>
+        </div>
+
+        <!-- Быстрый алфавитный фильтр -->
+        <div class="alphabet-bar" aria-label="Алфавитный указатель">
+          <button
+            v-for="letter in availableLetters"
+            :key="letter"
+            type="button"
+            :class="['letter-btn', { active: activeLetter === letter }]"
+            @click="activeLetter = activeLetter === letter ? '' : letter"
+          >
+            {{ letter }}
+          </button>
+        </div>
       </div>
 
-      <div class="teachers-grid">
+      <!-- Режим А: Результаты поиска или выбранный отдельный ЦК -->
+      <div v-if="searchQuery || activeDepartmentId || activeLetter" class="filtered-results-wrap">
+        <div class="results-stats">
+          <span>Найдено преподавателей: <strong>{{ filteredTeachers.length }}</strong></span>
+          <button v-if="searchQuery || activeDepartmentId || activeLetter" class="reset-filters-btn" @click="resetAllFilters">
+            Сбросить фильтры
+          </button>
+        </div>
+
+        <div v-if="filteredTeachers.length" class="teachers-grid">
+          <div
+            v-for="t in filteredTeachers"
+            :key="t.id"
+            class="teacher-card"
+            @click="$emit('select', t.id)"
+          >
+            <div class="teacher-card-main">
+              <span class="teacher-card-name">{{ t.name }}</span>
+              <span v-if="t.profile" class="teacher-card-profile">{{ t.profile }}</span>
+            </div>
+            <span class="teacher-dept-tag">{{ resolveDeptBadge(t.departmentId) }}</span>
+          </div>
+        </div>
+        <div v-else class="no-teachers-found">
+          <p>По вашему запросу преподавателей не найдено</p>
+        </div>
+      </div>
+
+      <!-- Режим Б: Группировка по всем ЦК (по умолчанию) -->
+      <div v-else class="dept-sections-list">
         <div
-          v-for="t in filteredTeachers"
-          :key="t.id"
-          class="teacher-card"
-          @click="$emit('select', t.id)"
+          v-for="deptGroup in teachersGroupedByDept"
+          :key="deptGroup.id"
+          class="dept-section-block"
         >
-          <span class="teacher-card-name">{{ t.name }}</span>
+          <div class="dept-section-header">
+            <span class="dept-header-badge">ЦК</span>
+            <div class="dept-header-info">
+              <h3 class="dept-header-title">{{ deptGroup.name }}</h3>
+              <span class="dept-header-count">{{ deptGroup.teachers.length }} преп.</span>
+            </div>
+          </div>
+
+          <div class="teachers-grid">
+            <div
+              v-for="t in deptGroup.teachers"
+              :key="t.id"
+              class="teacher-card"
+              @click="$emit('select', t.id)"
+            >
+              <div class="teacher-card-main">
+                <span class="teacher-card-name">{{ t.name }}</span>
+                <span v-if="t.profile" class="teacher-card-profile">{{ t.profile }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </template>
@@ -75,14 +170,64 @@ import { ref, computed } from 'vue';
 
 const props = defineProps({
   role: { type: String, default: 'teacher' },
-  items: { type: Array, default: () => [] }
+  items: { type: Array, default: () => [] },
+  departments: { type: Array, default: () => [] }
 });
 
 defineEmits(['select']);
 
+const searchQuery = ref('');
+const activeDepartmentId = ref('');
 const activeLetter = ref('');
 
-// 1. Алфавитный указатель преподавателей
+const totalTeachersCount = computed(() => {
+  return props.role === 'teacher' ? props.items.length : 0;
+});
+
+function extractShortDept(fullName) {
+  const name = String(fullName || '');
+  const matchNum = name.match(/\((\d{2})\)/);
+  if (matchNum) return `ЦК ${matchNum[1]}`;
+  if (name.includes('кафедр')) return 'Кафедра';
+  if (name.includes('гуманитарных')) return 'ЦК 01 (Гуманитарные)';
+  if (name.includes('математических')) return 'ЦК 02 (Математика)';
+  if (name.includes('Дизайн')) return 'ЦК Дизайн';
+  return name.slice(0, 18);
+}
+
+const deptNameMap = computed(() => {
+  const map = new Map();
+  props.departments.forEach(d => {
+    if (d && d.id) map.set(String(d.id), String(d.name || ''));
+  });
+  return map;
+});
+
+function resolveDeptBadge(deptId) {
+  if (!deptId) return 'Общие';
+  const full = deptNameMap.value.get(String(deptId));
+  return full ? extractShortDept(full) : 'ЦК';
+}
+
+const availableDepartments = computed(() => {
+  if (props.role !== 'teacher') return [];
+  const counts = new Map();
+  props.items.forEach(t => {
+    const dId = String(t.departmentId || 'unassigned');
+    counts.set(dId, (counts.get(dId) || 0) + 1);
+  });
+  const list = [];
+  props.departments.forEach(d => {
+    const c = counts.get(String(d.id)) || 0;
+    if (c > 0) list.push({ id: d.id, name: d.name, shortName: extractShortDept(d.name), count: c });
+  });
+  const unassignedCount = counts.get('unassigned') || 0;
+  if (unassignedCount > 0) {
+    list.push({ id: 'unassigned', name: 'Общие / Общеколледжные', shortName: 'Общие', count: unassignedCount });
+  }
+  return list;
+});
+
 const availableLetters = computed(() => {
   if (props.role !== 'teacher') return [];
   const set = new Set();
@@ -93,15 +238,58 @@ const availableLetters = computed(() => {
   return Array.from(set).sort((a, b) => a.localeCompare(b, 'ru'));
 });
 
-// 2. Отфильтрованные преподаватели
+function matchTeacherQuery(t, query) {
+  if (!query) return true;
+  const q = query.toLowerCase().trim();
+  const name = (t.name || '').toLowerCase();
+  const prof = (t.profile || '').toLowerCase();
+  return name.includes(q) || prof.includes(q);
+}
+
+function matchTeacherLetter(t, letter) {
+  if (!letter) return true;
+  return (t.name || '').trim().toUpperCase().startsWith(letter);
+}
+
+function matchTeacherDept(t, deptId) {
+  if (!deptId) return true;
+  if (deptId === 'unassigned') return !t.departmentId;
+  return String(t.departmentId) === String(deptId);
+}
+
 const filteredTeachers = computed(() => {
   if (props.role !== 'teacher') return [];
-  const list = [...props.items].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
-  if (!activeLetter.value) return list;
-  return list.filter(t => (t.name || '').trim().toUpperCase().startsWith(activeLetter.value));
+  return [...props.items]
+    .filter(t => matchTeacherDept(t, activeDepartmentId.value))
+    .filter(t => matchTeacherLetter(t, activeLetter.value))
+    .filter(t => matchTeacherQuery(t, searchQuery.value))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
 });
 
-// 3. Группировка аудиторий по корпусам
+const teachersGroupedByDept = computed(() => {
+  if (props.role !== 'teacher') return [];
+  const groups = [];
+  availableDepartments.value.forEach(dept => {
+    const inDept = props.items
+      .filter(t => matchTeacherDept(t, dept.id))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+    if (inDept.length > 0) {
+      groups.push({ id: dept.id, name: dept.name, shortName: dept.shortName, teachers: inDept });
+    }
+  });
+  return groups;
+});
+
+function resetAllFilters() {
+  searchQuery.value = '';
+  activeDepartmentId.value = '';
+  activeLetter.value = '';
+}
+
+function sortRoomsAlphabetical(a, b) {
+  return String(a.name).localeCompare(String(b.name), 'ru', { numeric: true });
+}
+
 const campusGroups = computed(() => {
   if (props.role !== 'room') return [];
   const mainRooms = [];
@@ -119,12 +307,10 @@ const campusGroups = computed(() => {
     }
   });
 
-  const sortFn = (a, b) => String(a.name).localeCompare(String(b.name), 'ru', { numeric: true });
-
   return [
-    { title: 'ул. Цветочная, 8 (Главный корпус)', badge: 'ЦВЕТОЧНАЯ', rooms: mainRooms.sort(sortFn) },
-    { title: 'Вознесенский пр., 44', badge: 'ВОЗНЕСЕНСКИЙ', rooms: voznesenskyRooms.sort(sortFn) },
-    { title: 'ул. Садовая, 54', badge: 'САДОВАЯ', rooms: sadovayaRooms.sort(sortFn) }
+    { title: 'ул. Цветочная, 8 (Главный корпус)', badge: 'ЦВЕТОЧНАЯ', rooms: mainRooms.sort(sortRoomsAlphabetical) },
+    { title: 'Вознесенский пр., 44', badge: 'ВОЗНЕСЕНСКИЙ', rooms: voznesenskyRooms.sort(sortRoomsAlphabetical) },
+    { title: 'ул. Садовая, 54', badge: 'САДОВАЯ', rooms: sadovayaRooms.sort(sortRoomsAlphabetical) }
   ].filter(c => c.rooms.length > 0);
 });
 </script>
@@ -140,7 +326,7 @@ const campusGroups = computed(() => {
 
 .ambient-orange-orb {
   position: absolute;
-  top: 50%;
+  top: 40%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(640px, 88vw);
@@ -155,14 +341,14 @@ const campusGroups = computed(() => {
     transparent 85%
   );
   filter: blur(52px);
-  opacity: 0.52;
+  opacity: 0.45;
   pointer-events: none;
   z-index: 0;
 }
 
 .ambient-orange-glow {
   position: absolute;
-  top: 50%;
+  top: 40%;
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(940px, 98vw);
@@ -175,7 +361,7 @@ const campusGroups = computed(() => {
     transparent 75%
   );
   filter: blur(80px);
-  opacity: 0.6;
+  opacity: 0.55;
   pointer-events: none;
   z-index: 0;
 }
@@ -198,13 +384,101 @@ const campusGroups = computed(() => {
   color: var(--ink-muted);
 }
 
-.alphabet-bar {
+.teacher-toolbar {
   position: relative;
   z-index: 2;
   display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.search-input-box {
+  position: relative;
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon-svg {
+  position: absolute;
+  left: 14px;
+  color: var(--ink-muted);
+  pointer-events: none;
+}
+
+.teacher-search-input {
+  width: 100%;
+  padding: 12px 38px 12px 42px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink-primary);
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-light);
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.teacher-search-input:focus {
+  outline: none;
+  border-color: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+}
+
+.clear-search-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--ink-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.dept-tabs-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
+.dept-tab-btn {
+  padding: 7px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dept-tab-btn:hover {
+  background: var(--blue-50);
+  color: var(--blue-700);
+  border-color: var(--blue-400);
+}
+
+.dept-tab-btn.active {
+  background: var(--blue-600);
+  color: #ffffff;
+  border-color: var(--blue-600);
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.25);
+}
+
+.alphabet-bar {
+  display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin-bottom: 20px;
 }
 
 .letter-btn {
@@ -214,7 +488,6 @@ const campusGroups = computed(() => {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.9);
   backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   font-weight: 700;
   font-size: 13px;
   color: var(--ink-secondary);
@@ -234,24 +507,44 @@ const campusGroups = computed(() => {
   border-color: var(--blue-600);
 }
 
-.teachers-grid {
+.filtered-results-wrap {
   position: relative;
   z-index: 2;
+}
+
+.results-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.reset-filters-btn {
+  background: none;
+  border: none;
+  color: var(--blue-700);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.teachers-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 12px;
 }
 
 .teacher-card {
-  position: relative;
-  z-index: 2;
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 12px;
   cursor: pointer;
@@ -265,14 +558,93 @@ const campusGroups = computed(() => {
   transform: translateY(-2px);
 }
 
-.teacher-avatar {
-  font-size: 20px;
+.teacher-card-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .teacher-card-name {
   font-size: 14px;
   font-weight: 700;
   color: var(--ink-primary);
+}
+
+.teacher-card-profile {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  line-height: 1.35;
+}
+
+.teacher-dept-tag {
+  align-self: flex-start;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--blue-700);
+  background: var(--blue-50);
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--blue-200);
+}
+
+.dept-sections-list {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.dept-section-block {
+  background: rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.03);
+}
+
+.dept-section-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dept-header-badge {
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+  background: #f97316;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.dept-header-info {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dept-header-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink-primary);
+  margin: 0;
+}
+
+.dept-header-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.no-teachers-found {
+  padding: 32px 0;
+  text-align: center;
+  color: var(--ink-muted);
+  font-size: 14px;
 }
 
 .campuses-list {
@@ -284,11 +656,8 @@ const campusGroups = computed(() => {
 }
 
 .campus-block {
-  position: relative;
-  z-index: 2;
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 16px;
   padding: 20px;

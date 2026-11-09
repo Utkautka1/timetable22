@@ -24,15 +24,23 @@ function normalizeScheduleData(schedule) {
   return { ...schedule, instances, rawInstances };
 }
 
-function matchSubWithLesson(sub, inst, dayIndex, period) {
-  if (sub.instId && inst.instId) {
-    if (inst.instId.startsWith(sub.instId) || sub.instId.startsWith(inst.instId)) return true;
-    if (inst._publishedSourceInstId && inst._publishedSourceInstId === sub.instId) return true;
-  }
-  const matchGroup = !sub.groupId || String(sub.groupId) === String(inst.groupId);
-  const matchDay = Number(sub.day) === Number(dayIndex);
-  const matchPeriod = Number(sub.period) === Number(period);
-  return matchGroup && matchDay && matchPeriod;
+function canonicalPublicInstId(value) {
+  let id = String(value || '');
+  while (/__PUBW\d+$/i.test(id)) id = id.replace(/__PUBW\d+$/i, '');
+  return id;
+}
+
+function matchSubWithLesson(sub, inst, dateISO) {
+  if (!sub || !inst) return false;
+  if (sub.date && dateISO && String(sub.date) !== String(dateISO)) return false;
+  const subIds = [sub.instId, sub.sourceInstId, sub.originalInstId]
+    .map(canonicalPublicInstId)
+    .filter(Boolean);
+  if (!subIds.length) return false;
+  const instIds = [inst.instId, inst._publishedSourceInstId, inst.id]
+    .map(canonicalPublicInstId)
+    .filter(Boolean);
+  return instIds.some(id => subIds.includes(id));
 }
 
 export function useScheduleData() {
@@ -48,6 +56,7 @@ export function useScheduleData() {
 
   const groups = computed(() => indexData.value?.data?.groups || []);
   const teachers = computed(() => indexData.value?.data?.teachers || []);
+  const departments = computed(() => indexData.value?.data?.departments || []);
   const rooms = computed(() => indexData.value?.data?.rooms || []);
   const subjects = computed(() => indexData.value?.data?.subjects || []);
   const specialties = computed(() => indexData.value?.data?.specialties || []);
@@ -91,7 +100,7 @@ export function useScheduleData() {
     selectedId.value = init.id;
     selectedWeek.value = init.week;
     saveSelection(init.kind, init.id, init.week);
-    syncBrowserUrl(init.kind, init.id, init.week);
+    syncBrowserUrl(init.kind, init.id, init.week, data?.groups || []);
   }
 
   async function loadScheduleShard(kind, id, week = selectedWeek.value) {
@@ -165,8 +174,8 @@ export function useScheduleData() {
     return defaults[idx] || '';
   }
 
-  function findSubstitutionForLesson(instance, dayIndex, period) {
-    return substitutions.value.find(sub => matchSubWithLesson(sub, instance, dayIndex, period));
+  function findSubstitutionForLesson(instance, dateISO) {
+    return substitutions.value.find(sub => matchSubWithLesson(sub, instance, dateISO));
   }
 
   function updateSubstitutions(val) {
@@ -183,6 +192,7 @@ export function useScheduleData() {
     selectedWeek,
     groups,
     teachers,
+    departments,
     rooms,
     subjects,
     specialties,

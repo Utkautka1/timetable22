@@ -57,6 +57,7 @@
         >
           <div class="day-header">
             <span class="day-title">{{ dayObj.name }}</span>
+            <span v-if="dayObj.dateFormatted" class="day-date">{{ dayObj.dateFormatted }}</span>
           </div>
 
           <div class="day-lessons">
@@ -70,7 +71,7 @@
                 :subjectName="getSubjectName(inst.subjectId)"
                 :teacherName="getTeacherName(inst.teacherId)"
                 :roomName="getRoomName(inst.roomId || inst.dedicatedRoomId || inst.preferredRoomIds?.[0])"
-                :substitution="findSub(inst, dayObj.index, inst.period || 1)"
+                :substitution="findSub(inst, dayObj.dateISO, dayObj.index, inst.period || 1)"
                 :getGroupName="getGroupName"
                 :getTeacherName="getTeacherName"
                 :getRoomName="getRoomName"
@@ -103,6 +104,8 @@ const props = defineProps({
   role: { type: String, default: 'group' },
   instances: { type: Array, default: () => [] },
   loading: { type: Boolean, default: false },
+  selectedWeek: { type: Number, default: 10 },
+  semesterStart: { type: String, default: '' },
   getGroupName: { type: Function, default: () => '' },
   getSubjectName: { type: Function, required: true },
   getTeacherName: { type: Function, required: true },
@@ -114,6 +117,32 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['select-teacher', 'select-group']);
+
+const MONTH_NAMES = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'
+];
+
+function formatCalendarDate(startStr, weekNum, dayIdx) {
+  if (!startStr || !weekNum) return '';
+  const dt = new Date(startStr);
+  if (isNaN(dt.getTime())) return '';
+  const mondayOffset = (dt.getDay() + 6) % 7;
+  dt.setDate(dt.getDate() - mondayOffset + (weekNum - 1) * 7 + dayIdx);
+  return `${dt.getDate()} ${MONTH_NAMES[dt.getMonth()]}`;
+}
+
+function formatISODate(startStr, weekNum, dayIdx) {
+  if (!startStr || !weekNum) return '';
+  const dt = new Date(startStr);
+  if (isNaN(dt.getTime())) return '';
+  const mondayOffset = (dt.getDay() + 6) % 7;
+  dt.setDate(dt.getDate() - mondayOffset + (weekNum - 1) * 7 + dayIdx);
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth() + 1).padStart(2, '0');
+  const d = String(dt.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
 
 function handleSelectTeacher(teacherId) {
   emit('select-teacher', teacherId);
@@ -131,9 +160,17 @@ const safeInstances = computed(() => {
 
 const displayedDays = computed(() => {
   if (activeDayIndex.value >= 0 && activeDayIndex.value < DAY_NAMES.length) {
-    return [{ name: DAY_NAMES[activeDayIndex.value], index: activeDayIndex.value }];
+    const idx = activeDayIndex.value;
+    const dateFormatted = formatCalendarDate(props.semesterStart, props.selectedWeek, idx);
+    const dateISO = formatISODate(props.semesterStart, props.selectedWeek, idx);
+    return [{ name: DAY_NAMES[idx], index: idx, dateFormatted, dateISO }];
   }
-  return DAY_NAMES.map((name, index) => ({ name, index }));
+  return DAY_NAMES.map((name, index) => ({
+    name,
+    index,
+    dateFormatted: formatCalendarDate(props.semesterStart, props.selectedWeek, index),
+    dateISO: formatISODate(props.semesterStart, props.selectedWeek, index)
+  }));
 });
 
 function parseClockMinutes(timeStr) {
@@ -290,6 +327,16 @@ function getLessonsForDay(dayIdx) {
   font-weight: 800;
   color: var(--blue-700);
   letter-spacing: -0.01em;
+}
+
+.day-date {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.08);
+  padding: 3px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(249, 115, 22, 0.2);
 }
 
 .day-count {

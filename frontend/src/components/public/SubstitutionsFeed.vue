@@ -1,7 +1,10 @@
 <template>
   <div class="substitutions-feed">
     <div v-if="!substitutions.length" class="empty-subs">
-      <span class="empty-icon">✅</span>
+      <svg class="empty-icon-svg" viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#16a34a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+      </svg>
       <p>Активных замен нет — занятия проводятся по основному расписанию.</p>
     </div>
 

@@ -1,6 +1,7 @@
 /**
  * Синхронизация маршрутов и сохранения состояния расписания:
  * чтение URL-параметров (path, search, hash), localStorage,
+ * поддержка формата /specialty/:specId/year/:year/group/:groupId
  * и актуализация browser history без перезагрузки страницы.
  */
 
@@ -14,22 +15,31 @@ function safeDecode(val) {
   }
 }
 
+function findEntityInParts(parts) {
+  const groupIdx = parts.indexOf('group');
+  if (groupIdx !== -1 && parts[groupIdx + 1]) {
+    return { kind: 'group', id: safeDecode(parts[groupIdx + 1]) };
+  }
+  const teacherIdx = parts.indexOf('teacher');
+  if (teacherIdx !== -1 && parts[teacherIdx + 1]) {
+    return { kind: 'teacher', id: safeDecode(parts[teacherIdx + 1]) };
+  }
+  const roomIdx = parts.indexOf('room');
+  if (roomIdx !== -1 && parts[roomIdx + 1]) {
+    return { kind: 'room', id: safeDecode(parts[roomIdx + 1]) };
+  }
+  return null;
+}
+
 function parseUrlPath(pathname) {
   const parts = (pathname || '').split('/').filter(Boolean);
-  const first = parts[0];
-  const second = parts[1];
-  if (first === 'group' && second) return { kind: 'group', id: safeDecode(second) };
-  if (first === 'teacher' && second) return { kind: 'teacher', id: safeDecode(second) };
-  if (first === 'room' && second) return { kind: 'room', id: safeDecode(second) };
-  return null;
+  return findEntityInParts(parts);
 }
 
 function parseUrlHash(hash) {
   const clean = (hash || '').replace(/^#\/?/, '');
-  if (clean.startsWith('group/')) return { kind: 'group', id: safeDecode(clean.slice(6)) };
-  if (clean.startsWith('teacher/')) return { kind: 'teacher', id: safeDecode(clean.slice(8)) };
-  if (clean.startsWith('room/')) return { kind: 'room', id: safeDecode(clean.slice(5)) };
-  return null;
+  const parts = clean.split('/').filter(Boolean);
+  return findEntityInParts(parts);
 }
 
 function parseUrlSearch(search) {
@@ -111,16 +121,28 @@ export function resolveInitialSelection(data) {
   return { kind: targetKind, id: targetId, week: finalWeek };
 }
 
-export function syncBrowserUrl(kind, id, week) {
+function buildGroupUrl(group) {
+  if (group && group.specialtyId && group.admissionYear) {
+    const spec = encodeURIComponent(String(group.specialtyId));
+    const yr = encodeURIComponent(String(group.admissionYear));
+    const gid = encodeURIComponent(String(group.id));
+    return `/specialty/${spec}/year/${yr}/group/${gid}`;
+  }
+  return `/group/${encodeURIComponent(String(group?.id || ''))}`;
+}
+
+export function syncBrowserUrl(kind, id, week, groupsList = []) {
   if (typeof window === 'undefined') return;
   if (window.location.pathname.startsWith('/admin')) return;
   if (!id) {
-    if (window.location.pathname !== '/') {
-      window.history.replaceState(null, '', '/');
-    }
+    if (window.location.pathname !== '/') window.history.replaceState(null, '', '/');
     return;
   }
-  const basePath = `/${kind}/${encodeURIComponent(id)}`;
+  let basePath = `/${kind}/${encodeURIComponent(String(id))}`;
+  if (kind === 'group' && Array.isArray(groupsList)) {
+    const found = groupsList.find(g => String(g.id) === String(id));
+    if (found) basePath = buildGroupUrl(found);
+  }
   const search = week ? `?week=${week}` : '';
   const newUrl = `${basePath}${search}`;
   if (window.location.pathname + window.location.search !== newUrl) {
